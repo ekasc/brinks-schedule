@@ -1,0 +1,14 @@
+node_modules/
+build/
+.svelte-kit/
+package-lock.json
+.env
+data/
+*.db
+*.db-shm
+*.db-wal
+.DS_Store
+.idea/
+.vscode/
+*.log
+/tmp/

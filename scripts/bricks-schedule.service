@@ -1,0 +1,19 @@
+[Unit]
+Description=Bricks Schedule (SvelteKit)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ekasc
+WorkingDirectory=/home/ekasc/bricks-schedule
+EnvironmentFile=/home/ekasc/bricks-schedule/.env
+ExecStart=/usr/bin/env node build/index.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/ekasc/bricks-schedule/data /home/ekasc/bricks-schedule/uploads
+
+[Install]
+WantedBy=multi-user.target
