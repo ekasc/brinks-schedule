@@ -22,6 +22,48 @@ db.exec(`
     display_name TEXT NOT NULL,
     created_at INTEGER NOT NULL DEFAULT (unixepoch())
   );
+  CREATE TABLE IF NOT EXISTS availability_blocks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tech_id INTEGER NOT NULL,
+    starts_at INTEGER NOT NULL,
+    ends_at INTEGER NOT NULL,
+    note TEXT,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    FOREIGN KEY (tech_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+  CREATE TABLE IF NOT EXISTS jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tech_id INTEGER NOT NULL,
+    booked_by INTEGER NOT NULL,
+    client_name TEXT NOT NULL,
+    address TEXT NOT NULL,
+    lat REAL,
+    lng REAL,
+    starts_at INTEGER NOT NULL,
+    ends_at INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'sent' CHECK (status IN ('sent','signed','cancelled')),
+    completed_at INTEGER,
+    notes TEXT,
+    email TEXT,
+    dob TEXT,
+    telus_pin TEXT,
+    id_type TEXT,
+    id_last4 TEXT,
+    emergency_name TEXT,
+    emergency_number TEXT,
+    emergency_relation TEXT,
+    verbal_password TEXT,
+    svc_internet INTEGER NOT NULL DEFAULT 0,
+    svc_home_phone INTEGER NOT NULL DEFAULT 0,
+    svc_tv INTEGER NOT NULL DEFAULT 0,
+    themes TEXT,
+    security_offered TEXT,
+    payout_cents INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch()),
+    FOREIGN KEY (tech_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (booked_by) REFERENCES users(id) ON DELETE CASCADE
+  );
 `);
 
 function upsertUser(username, password, role, displayName) {
@@ -45,6 +87,72 @@ upsertUser('admin_esc', 'changeme', 'admin', 'Admin (esc)');
 upsertUser('raman', 'changeme', 'sales', 'Raman');
 upsertUser('tech1', 'changeme', 'tech', 'Tech 1');
 upsertUser('tech2', 'changeme', 'tech', 'Tech 2');
+
+const users = Object.fromEntries(
+  db.prepare(`SELECT id, username FROM users`).all().map((user) => [user.username, user.id])
+);
+
+function localTimestamp(dayOffset, hour, minute = 0) {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() + dayOffset);
+  date.setHours(hour, minute, 0, 0);
+  return Math.floor(date.getTime() / 1000);
+}
+
+const dummyJobs = [
+  ['Maya Singh', '412 W 8th Ave, Vancouver', 0, 9, 0, 90, 'signed', 'tech1', 18000, 49.2635, -123.1148],
+  ['Noah Williams', '1285 Pender St W, Vancouver', 0, 11, 0, 120, 'signed', 'tech2', 22000, 49.2883, -123.1244],
+  ['Ava Chen', '88 Lonsdale Ave, North Vancouver', 0, 14, 0, 90, 'sent', 'tech1', 16000, 49.3121, -123.0794],
+  ['Liam Patel', '733 Marine Dr, North Vancouver', 1, 9, 30, 120, 'signed', 'tech2', 24000, 49.3224, -123.0986],
+  ['Sophia Martin', '4500 Kingsway, Burnaby', 1, 13, 0, 90, 'signed', 'tech1', 19000, 49.2293, -123.0063],
+  ['Ethan Wilson', '610 6th St, New Westminster', 2, 10, 0, 120, 'signed', 'tech1', 25000, 49.2103, -122.9226],
+  ['Isabella Brown', '1033 Austin Ave, Coquitlam', 2, 14, 30, 90, 'cancelled', 'tech2', 17000, 49.2485, -122.8672],
+  ['Lucas Garcia', '152 St & 104 Ave, Surrey', 3, 9, 0, 180, 'signed', 'tech2', 30000, 49.1913, -122.8011],
+  ['Amelia Johnson', '800 Robson St, Vancouver', 3, 13, 30, 90, 'sent', 'tech1', 18000, 49.2814, -123.1192],
+  ['Oliver Lee', '555 W 12th Ave, Vancouver', 4, 10, 0, 120, 'signed', 'tech1', 22000, 49.2612, -123.1165],
+  ['Mia Thompson', '1200 Lynn Valley Rd, North Vancouver', 4, 14, 0, 120, 'signed', 'tech2', 23000, 49.3369, -123.0387],
+  ['Elijah Davis', '4700 Kingsway, Burnaby', 5, 11, 0, 90, 'signed', 'tech2', 19000, 49.2276, -122.9992],
+  ['Charlotte Moore', '1499 Marine Dr, West Vancouver', 6, 10, 30, 120, 'signed', 'tech1', 26000, 49.3288, -123.1582]
+];
+
+const seedDummyData = db.transaction(() => {
+  db.prepare(`DELETE FROM jobs WHERE email LIKE '%@example.test'`).run();
+  db.prepare(`DELETE FROM availability_blocks WHERE note LIKE '[DEV]%'`).run();
+
+  const insertAvailability = db.prepare(`
+    INSERT INTO availability_blocks (tech_id, starts_at, ends_at, note) VALUES (?, ?, ?, ?)
+  `);
+  for (let day = 0; day < 14; day++) {
+    if ([0, 6].includes(new Date(localTimestamp(day, 12) * 1000).getDay())) continue;
+    insertAvailability.run(users.tech1, localTimestamp(day, 8), localTimestamp(day, 17), '[DEV] Regular hours');
+    insertAvailability.run(users.tech2, localTimestamp(day, 9), localTimestamp(day, 18), '[DEV] Regular hours');
+  }
+
+  const insertJob = db.prepare(`
+    INSERT INTO jobs (
+      tech_id, booked_by, client_name, address, lat, lng, starts_at, ends_at,
+      status, notes, email, dob, telus_pin, id_type, id_last4,
+      emergency_name, emergency_number, emergency_relation, verbal_password,
+      svc_internet, svc_home_phone, svc_tv, themes, security_offered, payout_cents
+    ) VALUES (
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    )
+  `);
+  for (const [index, job] of dummyJobs.entries()) {
+    const [name, address, day, hour, minute, duration, status, tech, payout, lat, lng] = job;
+    const startsAt = localTimestamp(day, hour, minute);
+    insertJob.run(
+      users[tech], users.ekas, name, address, lat, lng, startsAt, startsAt + duration * 60,
+      status, 'Development seed job', `${name.toLowerCase().replaceAll(' ', '.')}@example.test`,
+      '1990-05-15', String(4100 + index), 'dl', String(7300 + index),
+      'Jordan Example', '604-555-0100', 'Partner', 'cedar',
+      index % 2, Number(index % 3 === 0), Number(index % 2 === 0), 'Sports and movies',
+      'Smart camera, door sensor, and monitored alarm', payout
+    );
+  }
+});
+seedDummyData();
 
 const all = db.prepare(`SELECT username, role, display_name FROM users ORDER BY role, username`).all();
 console.log('\nCurrent users:');

@@ -36,11 +36,11 @@
     for (const j of data.jobs) {
       const m = L.marker([j.lat, j.lng]).addTo(map);
       m.bindPopup(
-        `<div style="font-family: -apple-system, system-ui, sans-serif; min-width: 180px;">
-          <div style="font-weight: 600; margin-bottom: 4px;">${escape(j.client_name)}</div>
-          <div style="font-size: 12px; color: #555;">${escape(j.address)}</div>
-          <div style="font-size: 12px; color: #555; margin-top: 4px;">${escape(j.tech_name)}</div>
-          <a href="/jobs/${j.id}" style="display: inline-block; margin-top: 8px; color: #0A84FF; font-size: 13px; text-decoration: none;">Open job →</a>
+        `<div>
+          <div>${escape(j.client_name)}</div>
+          <div>${escape(j.address)}</div>
+          <div>${escape(j.tech_name)}</div>
+          <a href="/jobs/${j.id}">Open job →</a>
         </div>`
       );
       markers.push(m);
@@ -56,9 +56,9 @@
   });
 </script>
 
-<div class="large-title">
+<div class="mb-6">
   <h1>Map</h1>
-  <div class="sub">
+  <div class="mt-1 text-gray-400">
     {data.jobs.length} job{data.jobs.length === 1 ? '' : 's'} with a location set.
     {#if data.jobs.length === 0}
       Open a job and tap "Set location" to drop a pin.
@@ -66,19 +66,7 @@
   </div>
 </div>
 
-<div class="map-wrap">
-  <div bind:this={mapEl} class="map"></div>
+<div class="mx-4 h-[calc(100vh-200px)] min-h-[360px] overflow-hidden rounded-xl border border-gray-700">
+  <div bind:this={mapEl} class="h-full w-full"></div>
 </div>
 
-<style>
-  .map-wrap {
-    margin: 0 var(--s-4);
-    border-radius: var(--r-2);
-    overflow: hidden;
-    border: 1px solid var(--line);
-    height: calc(100vh - 200px);
-    min-height: 360px;
-  }
-  .map { width: 100%; height: 100%; }
-  :global(.leaflet-popup-content) { margin: var(--s-3) var(--s-3); }
-</style>
