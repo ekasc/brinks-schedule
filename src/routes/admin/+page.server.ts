@@ -5,7 +5,7 @@ import { listUsers, createUser, updatePassword, updateDisplayName } from '$lib/s
 export const load: PageServerLoad = async ({ locals }) => {
   if (!locals.user) throw redirect(302, '/login');
   if (locals.user.role !== 'admin') throw redirect(302, '/');
-  return { users: listUsers() };
+  return { users: await listUsers() };
 };
 
 export const actions: Actions = {
@@ -20,7 +20,7 @@ export const actions: Actions = {
     if (!['admin', 'sales', 'tech'].includes(role)) return fail(400, { error: 'bad role' });
     if (password.length < 6) return fail(400, { error: 'password too short' });
     try {
-      createUser(username, password, role, displayName);
+      await createUser(username, password, role, displayName);
     } catch (e: any) {
       return fail(400, { error: e?.message || 'could not create user' });
     }
@@ -32,7 +32,7 @@ export const actions: Actions = {
     const id = Number(data.get('id') || 0);
     const password = String(data.get('password') || '');
     if (!id || password.length < 6) return fail(400, { error: 'bad input' });
-    updatePassword(id, password);
+    await updatePassword(id, password);
     return { ok: true };
   },
   rename: async ({ request, locals }) => {
@@ -41,7 +41,7 @@ export const actions: Actions = {
     const id = Number(data.get('id') || 0);
     const displayName = String(data.get('display_name') || '').trim();
     if (!id || !displayName) return fail(400, { error: 'bad input' });
-    updateDisplayName(id, displayName);
+    await updateDisplayName(id, displayName);
     return { ok: true };
   }
 };

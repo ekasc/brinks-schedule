@@ -1,10 +1,15 @@
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { env } from '$env/dynamic/private';
+import { dev } from '$app/environment';
 import type { User } from './db';
 import { findUserByUsername, findUserById, verifyPassword } from './db';
 
-const SECRET = env.JWT_SECRET || 'dev-only-secret';
+const SECRET = env.JWT_SECRET;
+const FINAL_SECRET = SECRET ?? 'dev-only-secret';
+if (!SECRET && dev) {
+  console.warn('[auth] JWT_SECRET is not set — using an insecure dev-only fallback. Set JWT_SECRET before deploying.');
+}
 const COOKIE = 'bs_session';
 
 export interface SessionPayload {
@@ -14,23 +19,20 @@ export interface SessionPayload {
 }
 
 export function sign(payload: SessionPayload): string {
-  return jwt.sign(payload, SECRET, { expiresIn: '30d' });
+  if (!SECRET && !dev) throw new Error('JWT_SECRET must be set in production. Refusing to sign sessions.');
+  return jwt.sign(payload, FINAL_SECRET, { expiresIn: '30d' });
 }
 
 export function verify(token: string): SessionPayload | null {
+  if (!SECRET && !dev) return null;
   try {
-    return jwt.verify(token, SECRET) as SessionPayload;
+    return jwt.verify(token, FINAL_SECRET) as SessionPayload;
   } catch {
     return null;
   }
 }
 
-export function makeCookie(value: string): string {
-  return `${COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`;
-}
-export function clearCookie(): string {
-  return `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
-}
+
 export function readCookie(cookieHeader: string | null): string | null {
   if (!cookieHeader) return null;
   for (const part of cookieHeader.split(';')) {
@@ -40,19 +42,19 @@ export function readCookie(cookieHeader: string | null): string | null {
   return null;
 }
 
-export function authenticate(username: string, password: string): User | null {
-  const u = findUserByUsername(username.toLowerCase().trim());
+export async function authenticate(username: string, password: string): Promise<User | null> {
+  const u = await findUserByUsername(username.toLowerCase().trim());
   if (!u) return null;
   if (!verifyPassword(u, password)) return null;
-  return findUserById(u.id);
+  return (await findUserById(u.id)) ?? null;
 }
 
-export function userFromCookie(cookieHeader: string | null): User | null {
+export async function userFromCookie(cookieHeader: string | null): Promise<User | null> {
   const token = readCookie(cookieHeader);
   if (!token) return null;
   const payload = verify(token);
   if (!payload) return null;
-  return findUserById(payload.uid);
+  return (await findUserById(payload.uid)) ?? null;
 }
 
 // --- password helpers (re-exported for the admin "set password" page) ---

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { PageData } from './$types';
+  import { Button } from 'bits-ui';
   export let data: PageData;
   let query = '';
   function fmtTime(ts: number) { return new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); }
@@ -12,7 +13,7 @@
 <div class="large-title inline"><h1>Today</h1><span class="role-pill">{data.user?.display_name}</span></div>
 <div class="today-meta"><span>Today · {data.upcoming.length} total</span><span>{grouped.length}/{data.techs.length} techs busy</span></div>
 <div class="tech-cards">{#each data.techs as tech}<div class="tech-card"><span>{tech.display_name}</span><strong>{visible.filter(j => j.tech_id === tech.id).length}</strong><span>{visible.filter(j => j.tech_id === tech.id).length === 1 ? 'job' : 'jobs'}</span></div>{/each}</div>
-<div class="search-bar"><input class="search-input" bind:value={query} placeholder="Search client or address" aria-label="Search client or address" /><button type="button">Search</button><a href="/calendar">Past 7 days</a></div>
+<div class="search-bar"><input class="search-input" bind:value={query} placeholder="Search client or address" aria-label="Search client or address" /><Button.Root type="button">Search</Button.Root><a href="/calendar">Past 7 days</a></div>
 {#if visible.length === 0}
   <div class="empty"><h3>{query ? 'No matching jobs' : 'No jobs scheduled'}</h3><div>{query ? 'Try another search.' : 'Booked jobs will show here as the day unfolds.'}</div>{#if data.isSales}<div class="hint"><a href="/book">Book a job →</a></div>{/if}</div>
 {:else}

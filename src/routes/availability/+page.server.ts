@@ -12,7 +12,7 @@ function startOfWeek(d: Date): Date {
 export const load: PageServerLoad = async ({ locals, url }) => {
   if (!locals.user) throw redirect(302, '/login');
   // sales+admin see all techs; tech sees their own calendar
-  const techs = (locals.user.role === 'tech') ? [locals.user] : listUsers('tech');
+  const techs = (locals.user.role === 'tech') ? [locals.user] : await listUsers('tech');
   const offsetWeeks = Number(url.searchParams.get('w') || '0');
   const base = startOfWeek(new Date());
   base.setDate(base.getDate() + offsetWeeks * 7);
@@ -22,8 +22,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   const blocksByTech: Record<number, any[]> = {};
   const jobsByTech: Record<number, any[]> = {};
   for (const t of techs) {
-    blocksByTech[t.id] = listAvailability(t.id, startTs, endTs);
-    jobsByTech[t.id] = listJobs(startTs, endTs, t.id);
+    blocksByTech[t.id] = await listAvailability(t.id, startTs, endTs);
+    jobsByTech[t.id] = await listJobs(startTs, endTs, t.id);
   }
 
   return {
@@ -50,7 +50,7 @@ export const actions: Actions = {
     if (!(endsAt > startsAt)) return fail(400, { error: 'end must be after start' });
     // only the tech themselves or admin can add for a tech
     if (locals.user.role === 'tech' && techId !== locals.user.id) return fail(403, { error: 'forbidden' });
-    addAvailability(techId, startsAt, endsAt, note);
+    await addAvailability(techId, startsAt, endsAt, note);
     return { ok: true };
   },
   remove: async ({ request, locals }) => {
@@ -60,7 +60,7 @@ export const actions: Actions = {
     const techId = Number(data.get('tech_id') || 0);
     if (locals.user.role === 'tech' && techId !== locals.user.id) return fail(403, { error: 'forbidden' });
     if (locals.user.role === 'sales') return fail(403, { error: 'forbidden' });
-    removeAvailability(id, techId);
+    await removeAvailability(id, techId);
     return { ok: true };
   }
 };

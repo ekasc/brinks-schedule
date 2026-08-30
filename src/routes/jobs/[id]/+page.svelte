@@ -1,6 +1,9 @@
 <script lang="ts">
   import type { PageData } from './$types';
   import { invalidateAll } from '$app/navigation';
+  import { Dialog, Button } from 'bits-ui';
+  import { fly, scale } from 'svelte/transition';
+  import { cubicOut } from 'svelte/easing';
   export let data: PageData;
 
   let showMap = false;
@@ -12,6 +15,9 @@
   let busy = false;
   let pendingLat: number | null = null;
   let pendingLng: number | null = null;
+  let confirmStatus: string | null = null;
+  let confirmCompleted = false;
+  $: if (busy) { confirmStatus = null; confirmCompleted = false; }
 
   function fmt(ts: number) {
     return new Date(ts * 1000).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
@@ -29,8 +35,8 @@
   }
 
   async function setStatus(s: string) {
-    if (!confirm(`Mark this job as ${s}?`)) return;
     busy = true;
+    confirmStatus = null;
     try {
       const fd = new FormData();
       fd.set('status', s);
@@ -39,6 +45,10 @@
     } finally {
       busy = false;
     }
+  }
+  function requestStatus(s: string) {
+    if (confirmStatus === s) setStatus(s);
+    else confirmStatus = s;
   }
 
   async function openMap() {
@@ -107,6 +117,7 @@
   }
   async function setCompleted(done: boolean) {
     busy = true;
+    confirmCompleted = false;
     try {
       const fd = new FormData();
       fd.set('completed', done ? '1' : '0');
@@ -116,14 +127,69 @@
       busy = false;
     }
   }
+  function requestCompleted() {
+    confirmCompleted = true;
+  }
+
+  function fmtFull(ts: number) {
+    return new Date(ts * 1000).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  }
+
+  function bookingSummary(): string {
+    const lines: string[] = [];
+    const L = (k: string, v: unknown) => lines.push(`${k}: ${v == null || v === '' ? '—' : v}`);
+    L('Telus Pin', j.telus_pin);
+    L('Full name', j.client_name);
+    L('Address', j.address);
+    L('Phone number', j.phone);
+    L('Email', j.email);
+    L('Date of Birth', j.dob);
+    L('DL last 4', j.id_last4 ? `${j.id_type ? j.id_type + ' ' : ''}••${j.id_last4}` : '');
+    L('Emergency contact name', j.emergency_name);
+    L('Contact ph number', j.emergency_number);
+    L('Contact relation', j.emergency_relation);
+    L('Verbal password', j.verbal_password);
+    L('Price', j.price_cents ? '$' + (j.price_cents / 100).toFixed(2) : '—');
+    L('Install date and time', `${fmtFull(j.starts_at)} – ${fmtFull(j.ends_at)}`);
+    L('Any extra equipment', j.themes);
+    L('Notes', j.notes);
+    return lines.join('\n');
+  }
+
+  let copied = false;
+  let copyBusy = false;
+  async function copyBooking() {
+    if (copyBusy) return;
+    copyBusy = true;
+    const text = bookingSummary();
+    try {
+      await navigator.clipboard.writeText(text);
+      copied = true;
+      setTimeout(() => (copied = false), 2000);
+    } catch {
+      window.prompt('Copy booking details:', text);
+    } finally {
+      copyBusy = false;
+    }
+  }
+  function downloadBooking() {
+    const text = bookingSummary();
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `booking-${j.id}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 </script>
 
 <svelte:head><title>{j.client_name}</title></svelte:head>
 
-<button on:click={goBack} class="mt-6 flex items-center gap-1.5 px-4 text-[14px] font-medium text-[var(--dim)] hover:text-[var(--ink)] transition-colors" aria-label="Go back">
+<Button.Root onclick={goBack} class="mt-6 flex items-center gap-1.5 px-4 text-[14px] font-medium text-[var(--dim)] hover:text-[var(--ink)] transition-colors" aria-label="Go back">
   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5"/><path d="M12 19l-7-7 7-7"/></svg>
   Back
-</button>
+</Button.Root>
 <!-- Title: generous top breathing room, tight internal grouping, clear hierarchy -->
 <div class="mt-4 mb-8 px-4">
   <div class="flex flex-wrap items-baseline gap-3">
@@ -177,6 +243,12 @@
         <span class="value ink break-all">{j.email}</span>
       </div>
     {/if}
+    {#if j.price_cents}
+      <div class="row-line row-line--compact">
+        <span class="label">Price</span>
+        <span class="value ink font-mono">${(j.price_cents / 100).toFixed(2)}</span>
+      </div>
+    {/if}
   </div>
 </div>
 
@@ -188,6 +260,12 @@
         <div class="row-line">
           <span class="label">Date of birth</span>
           <span class="value ink">{fmtDate(j.dob)}{age(j.dob) >= 0 ? ' (' + age(j.dob) + ')' : ''}</span>
+        </div>
+      {/if}
+      {#if j.phone}
+        <div class="row-line row-line--compact">
+          <span class="label">Phone</span>
+          <span class="value ink">{j.phone}</span>
         </div>
       {/if}
       {#if j.telus_pin}
@@ -262,23 +340,57 @@
 {#if data.canEdit}
   <div class="mt-8 flex flex-col gap-3 px-4">
     <div class="flex flex-wrap gap-2">
-      <button class="rounded-full border border-[var(--line)] bg-[var(--row)] px-4 py-2 text-[15px] font-medium text-[var(--blue)] hover:bg-[var(--row2)]" on:click={openMap}>{j.lat != null ? 'Move pin' : 'Set location'}</button>
+      <Button.Root class="rounded-full border border-[var(--line)] bg-[var(--row)] px-4 py-2 text-[15px] font-medium text-[var(--blue)] hover:bg-[var(--row2)]" onclick={openMap}>{j.lat != null ? 'Move pin' : 'Set location'}</Button.Root>
       {#if j.status === 'cancelled'}
-        <button class="rounded-full bg-[var(--row)] px-4 py-2 text-[15px] font-medium text-[var(--blue)] border border-[var(--line)]" on:click={reopen} disabled={busy}>Restore</button>
+        <Button.Root class="rounded-full bg-[var(--row)] px-4 py-2 text-[15px] font-medium text-[var(--blue)] border border-[var(--line)]" onclick={reopen} disabled={busy}>Restore</Button.Root>
       {/if}
     </div>
     {#if nextStatus}
-      <div class="flex flex-wrap gap-2">
-        <button class="flex-1 sm:flex-none rounded-[10px] bg-[var(--blue)] px-5 py-3 text-[17px] font-semibold text-white hover:bg-[var(--blue-press)] disabled:opacity-30 min-h-[50px]" on:click={advance} disabled={busy}>Mark {statusLabel[nextStatus]}</button>
-        {#if j.status !== 'cancelled'}<button class="rounded-[10px] border border-red-500/20 bg-red-500/10 px-5 py-3 text-[15px] font-medium text-red-500 hover:bg-red-500/15 disabled:opacity-30" on:click={() => setStatus('cancelled')} disabled={busy}>Cancel</button>{/if}
+      <div class="flex flex-wrap items-center gap-3">
+        <div class="flex items-center gap-3">
+          <Button.Root class="flex-1 sm:flex-none rounded-[10px] bg-[var(--blue)] px-5 py-3 text-[17px] font-semibold text-white hover:bg-[var(--blue-press)] disabled:opacity-30 min-h-[50px] transition-all duration-200 {confirmStatus ? '!ring-2 !ring-white/60 !ring-offset-2 !ring-offset-[var(--bg)]' : ''}" onclick={() => requestStatus(nextStatus!)} disabled={busy || (!!confirmStatus && confirmStatus !== nextStatus)}>{#if confirmStatus === nextStatus}Are you sure?{:else}Mark {statusLabel[nextStatus]}{/if}</Button.Root>
+          {#if confirmStatus === nextStatus}
+            <div in:fly={{ x: 12, duration: 220, easing: cubicOut }} out:scale={{ start: 0.96, duration: 140 }} class="shrink-0">
+              <Button.Root type="button" class="h-[50px] rounded-[10px] border border-[var(--line)] bg-[var(--row)] px-5 text-[15px] font-medium text-[var(--ink)] hover:bg-[var(--row2)]" onclick={() => confirmStatus = null} disabled={busy}>No</Button.Root>
+            </div>
+            <div in:fly={{ x: 12, duration: 240, easing: cubicOut, delay: 40 }} out:scale={{ start: 0.96, duration: 140 }} class="shrink-0">
+              <Button.Root type="button" class="h-[50px] rounded-[10px] bg-[var(--blue)] px-6 text-[15px] font-semibold text-white hover:bg-[var(--blue-press)] shadow-md shadow-[color-mix(in_srgb,var(--blue)_20%,transparent)] shrink-0" onclick={() => setStatus(nextStatus!)} disabled={busy}>Yes</Button.Root>
+            </div>
+          {/if}
+        </div>
+        {#if j.status !== 'cancelled'}
+          {#if confirmStatus === 'cancelled'}
+            <div class="flex items-center gap-3">
+              <span class="text-[14px] text-[var(--ink)]">Cancel job?</span>
+              <div in:fly={{ x: 12, duration: 220, easing: cubicOut }} out:scale={{ start: 0.96, duration: 140 }} class="shrink-0">
+                <Button.Root type="button" class="rounded-[10px] border border-[var(--line)] bg-[var(--row)] px-4 py-2 text-[14px] font-medium text-[var(--ink)] hover:bg-[var(--row2)]" onclick={() => confirmStatus = null} disabled={busy}>No</Button.Root>
+              </div>
+              <div in:fly={{ x: 12, duration: 240, easing: cubicOut, delay: 40 }} out:scale={{ start: 0.96, duration: 140 }} class="shrink-0">
+                <Button.Root type="button" class="rounded-[10px] bg-red-500 px-4 py-2 text-[14px] font-semibold text-white hover:bg-red-600 shadow-md" onclick={() => setStatus('cancelled')} disabled={busy}>Yes</Button.Root>
+              </div>
+            </div>
+          {:else}
+            <Button.Root class="rounded-[10px] border border-red-500/20 bg-red-500/10 px-5 py-3 text-[15px] font-medium text-red-500 hover:bg-red-500/15 disabled:opacity-30" onclick={() => requestStatus('cancelled')} disabled={busy}>Cancel</Button.Root>
+          {/if}
+        {/if}
       </div>
     {/if}
     {#if j.status === 'signed'}
       <div class="flex flex-wrap items-center gap-4 pt-6 border-t border-[var(--line-thin)] mt-6">
         {#if canComplete}
-          <button class="rounded-[10px] bg-emerald-600 px-5 py-3 text-[15px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-30" on:click={() => setCompleted(true)} disabled={busy}>Mark install completed</button>
+          <div class="flex flex-wrap items-center gap-3">
+            <Button.Root class="rounded-[10px] bg-emerald-600 px-5 py-3 text-[15px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-30 min-h-[50px] transition-all duration-200 {confirmCompleted ? '!ring-2 !ring-white/60 !ring-offset-2 !ring-offset-[var(--bg)]' : ''}" onclick={requestCompleted} disabled={busy}>{#if confirmCompleted}Are you sure?{:else}Mark install completed{/if}</Button.Root>
+            {#if confirmCompleted}
+              <div in:fly={{ x: 12, duration: 220, easing: cubicOut }} out:scale={{ start: 0.96, duration: 140 }} class="shrink-0">
+                <Button.Root type="button" class="h-[50px] rounded-[10px] border border-[var(--line)] bg-[var(--row)] px-5 text-[15px] font-medium text-[var(--ink)] hover:bg-[var(--row2)]" onclick={() => confirmCompleted = false} disabled={busy}>No</Button.Root>
+              </div>
+              <div in:fly={{ x: 12, duration: 240, easing: cubicOut, delay: 40 }} out:scale={{ start: 0.96, duration: 140 }} class="shrink-0">
+                <Button.Root type="button" class="h-[50px] rounded-[10px] bg-emerald-600 px-6 text-[15px] font-semibold text-white hover:bg-emerald-700 shadow-md shrink-0" onclick={() => setCompleted(true)} disabled={busy}>Yes</Button.Root>
+              </div>
+            {/if}
+          </div>
         {:else if canUncomplete && j.completed_at != null}
-          <button class="text-[15px] text-[var(--blue)] hover:opacity-70" on:click={() => setCompleted(false)} disabled={busy}>Reopen install</button>
+          <Button.Root class="text-[15px] text-[var(--blue)] hover:opacity-70" onclick={() => setCompleted(false)} disabled={busy}>Reopen install</Button.Root>
           <span class="text-sm text-[var(--dim)]">Done {fmt(j.completed_at)}</span>
         {/if}
       </div>
@@ -286,25 +398,35 @@
   </div>
 {/if}
 
-{#if showMap}
-  <div class="fixed inset-0 z-50 flex flex-col bg-[var(--bg)]" role="dialog" aria-modal="true" aria-label="Drop pin on map">
-    <div class="flex items-center justify-between border-b border-[var(--line)] px-4 py-3">
-      <h2 class="text-[17px] font-semibold">Drop a pin</h2>
-      <button class="text-[var(--blue)] hover:opacity-70" on:click={closeMap} aria-label="Close">Cancel</button>
-    </div>
-    <div bind:this={mapEl} class="h-full w-full"></div>
-    <div class="flex items-center justify-between border-t border-[var(--line)] px-4 py-3 gap-3">
-      {#if pendingLat != null}
-        <span class="text-sm text-[var(--dim)] font-mono">Pin: {pendingLat.toFixed(4)}, {pendingLng?.toFixed(4)}</span>
-      {:else}
-        <span class="text-sm text-[var(--dim)]">Tap the map to drop a pin.</span>
-      {/if}
-      <button class="rounded-[10px] bg-[var(--blue)] px-5 py-2.5 text-[15px] font-semibold text-white hover:bg-[var(--blue-press)] disabled:opacity-30 shrink-0" on:click={saveCoords} disabled={pendingLat == null || busy}>
-        {busy ? 'Saving…' : 'Save location'}
-      </button>
-    </div>
+{#if data.canSeePii}
+  <div class="mt-8 flex flex-wrap gap-2 px-4">
+    <Button.Root class="rounded-full border border-[var(--line)] bg-[var(--row)] px-4 py-2 text-[15px] font-medium text-[var(--blue)] hover:bg-[var(--row2)] disabled:opacity-40" onclick={copyBooking} disabled={copyBusy}>{copied ? 'Copied!' : 'Copy booking'}</Button.Root>
+    <Button.Root class="rounded-full border border-[var(--line)] bg-[var(--row)] px-4 py-2 text-[15px] font-medium text-[var(--blue)] hover:bg-[var(--row2)]" onclick={downloadBooking}>Export .txt</Button.Root>
   </div>
 {/if}
+
+<Dialog.Root bind:open={showMap}>
+  <Dialog.Portal>
+    <Dialog.Overlay class="fixed inset-0 z-[1000] bg-black/50" />
+    <Dialog.Content class="fixed inset-0 z-[1001] flex flex-col bg-[var(--bg)]">
+      <div class="flex items-center justify-between border-b border-[var(--line)] px-4 py-3">
+        <h2 class="text-[17px] font-semibold">Drop a pin</h2>
+        <Button.Root class="text-[var(--blue)] hover:opacity-70" onclick={closeMap} aria-label="Close">Cancel</Button.Root>
+      </div>
+      <div bind:this={mapEl} class="h-full w-full"></div>
+      <div class="flex items-center justify-between border-t border-[var(--line)] px-4 py-3 gap-3">
+        {#if pendingLat != null}
+          <span class="text-sm text-[var(--dim)] font-mono">Pin: {pendingLat.toFixed(4)}, {pendingLng?.toFixed(4)}</span>
+        {:else}
+          <span class="text-sm text-[var(--dim)]">Tap the map to drop a pin.</span>
+        {/if}
+        <Button.Root class="rounded-[10px] bg-[var(--blue)] px-5 py-2.5 text-[15px] font-semibold text-white hover:bg-[var(--blue-press)] disabled:opacity-30 shrink-0" onclick={saveCoords} disabled={pendingLat == null || busy}>
+          {busy ? 'Saving…' : 'Save location'}
+        </Button.Root>
+      </div>
+    </Dialog.Content>
+  </Dialog.Portal>
+</Dialog.Root>
 
 <div class="mt-10 flex justify-between px-4 text-sm">
   <a class="text-[var(--dim)] hover:text-[var(--ink)] transition-colors" href="/calendar">← Week</a>

@@ -23,7 +23,11 @@ export const bookJobSchema = z.object({
   ends_at: validDate,
   svc_internet: z.boolean().default(false),
   svc_home_phone: z.boolean().default(false),
-  svc_tv: z.boolean().default(false)
+  svc_tv: z.boolean().default(false),
+  phone: z.string().trim().regex(/^[+()\d\s-]{7,}$/, 'Enter a valid phone number.').optional().or(z.literal('')),
+  price: z.preprocess((v) => (v === '' || v == null ? undefined : Number(v)), z.number().min(0).optional()),
+  lat: z.preprocess((v) => (v === '' || v == null ? undefined : Number(v)), z.number().optional()),
+  lng: z.preprocess((v) => (v === '' || v == null ? undefined : Number(v)), z.number().optional())
 }).refine((value) => new Date(value.ends_at).getTime() > new Date(value.starts_at).getTime(), {
   path: ['ends_at'], message: 'End time needs to be after the start — pick a later slot.'
 });

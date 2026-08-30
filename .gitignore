@@ -12,3 +12,9 @@ data/
 .vscode/
 *.log
 /tmp/
+.wrangler/
+.pi/
+playwright-report/
+test-results/
+/_shot.png
+/screenshot.png

@@ -5,6 +5,10 @@ declare global {
     interface Locals {
       user: User | null;
     }
+    // Cloudflare Workers bindings (see wrangler.toml). `DB` is the D1 database.
+    interface Platform {
+      env: { DB: unknown };
+    }
   }
 }
 

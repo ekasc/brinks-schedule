@@ -12,7 +12,7 @@ function startOfWeek(d: Date): Date {
 
 export const load: PageServerLoad = async ({ locals, url }) => {
   if (!locals.user) throw redirect(302, '/login');
-  const techs = listUsers('tech');
+  const techs = await listUsers('tech');
   const offsetWeeks = Number(url.searchParams.get('w') || '0');
   const base = startOfWeek(new Date());
   base.setDate(base.getDate() + offsetWeeks * 7);
@@ -28,10 +28,10 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     days.push({
       iso: d.toISOString().slice(0, 10),
       date: d,
-      techs: techs.map(t => {
-        const jobs = listJobs(dayStart, dayEnd, t.id).sort((a, b) => a.starts_at - b.starts_at);
+      techs: await Promise.all(techs.map(async (t) => {
+        const jobs = (await listJobs(dayStart, dayEnd, t.id)).sort((a, b) => a.starts_at - b.starts_at);
         return { techId: t.id, techName: t.display_name, jobs };
-      })
+      }))
     });
   }
   return {

@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ActionData } from './$types';
+  import { Button } from 'bits-ui';
   export let form: ActionData;
 </script>
 
@@ -7,7 +8,7 @@
 
 <div class="mx-auto flex min-h-[70vh] max-w-sm flex-col justify-center gap-6 px-4">
   <div class="text-center text-4xl" aria-hidden="true">🔒</div>
-  <h1>Brinks Schedule</h1>
+  <h1>Schedule</h1>
 
   <form method="POST" class="flex flex-col gap-4">
     {#if form?.error}
@@ -21,6 +22,6 @@
         <input name="password" type="password" placeholder="Password" autocomplete="current-password" required aria-label="Password" />
       </div>
     </div>
-    <button type="submit" class="appearance-none rounded-md border-0 bg-blue-600 px-4 py-2 text-white hover:bg-blue-500 disabled:cursor-default disabled:opacity-30">Sign In</button>
+    <Button.Root type="submit" class="appearance-none rounded-md border-0 bg-blue-600 px-4 py-2 text-white hover:bg-blue-500 disabled:cursor-default disabled:opacity-30">Sign In</Button.Root>
   </form>
 </div>

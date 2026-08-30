@@ -1,0 +1,27 @@
+name = "schedule"
+main = ".svelte-kit/cloudflare/_worker.js"
+compatibility_date = "2024-11-15"
+compatibility_flags = ["nodejs_compat"]
+
+[assets]
+directory = ".svelte-kit/cloudflare"
+binding = "ASSETS"
+not_found_handling = "404-page"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "schedule"
+database_id = "1224ac71-56c9-49d9-a043-4c4892895efa"
+
+[vars]
+ORIGIN = "https://schedule.ekasc.workers.dev"
+
+# secrets: run
+# npx wrangler secret put JWT_SECRET
+# npx wrangler secret put PII_KEY  (optional, falls back to JWT_SECRET)
+
+[placement]
+mode = "smart"
+
+[observability.logs]
+enabled = true

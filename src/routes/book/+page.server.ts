@@ -8,14 +8,20 @@ import { listUsers, createJob, getAvailableSlots } from '$lib/server/db';
 export const load: PageServerLoad = async ({ locals, url }) => {
   if (!locals.user) throw redirect(302, '/login');
   if (locals.user.role === 'tech') throw redirect(302, '/');
-  const techs = listUsers('tech');
+  const techs = await listUsers('tech');
   const preselectTech = Number(url.searchParams.get('tech') || techs[0]?.id || 0);
   const durationMin = Number(url.searchParams.get('dur') || '90');
+  const allDurations = [60, 90, 120] as const;
   const slotsByTech: Record<number, { starts_at: number; ends_at: number }[]> = {};
-  for (const t of techs) slotsByTech[t.id] = getAvailableSlots(t.id, { durationMin });
+  const slotsByTechByDuration: Record<number, Record<number, { starts_at: number; ends_at: number }[]>> = {};
+  for (const t of techs) {
+    slotsByTech[t.id] = await getAvailableSlots(t.id, { durationMin });
+    slotsByTechByDuration[t.id] = {};
+    for (const d of allDurations) slotsByTechByDuration[t.id][d] = await getAvailableSlots(t.id, { durationMin: d });
+  }
   return {
     form: await superValidate(zod4(bookJobSchema)),
-    techs: techs.map(t => ({ id: t.id, display_name: t.display_name })), slotsByTech,
+    techs: techs.map(t => ({ id: t.id, display_name: t.display_name })), slotsByTech, slotsByTechByDuration,
     preselectTech, preselectDate: url.searchParams.get('date') || '',
     preselectStart: url.searchParams.get('start') || '10:00', durationMin
   };
@@ -30,17 +36,22 @@ export const actions: Actions = {
     const value = form.data;
     const startsAt = Math.floor(new Date(value.starts_at).getTime() / 1000);
     const endsAt = Math.floor(new Date(value.ends_at).getTime() / 1000);
-    const available = getAvailableSlots(value.tech_id, { fromTs: Math.floor(Date.now() / 1000), toTs: Math.floor(Date.now() / 1000) + 14 * 86400 });
+    // Reproduce the slot using the actual selected duration; getAvailableSlots defaults to
+    // 90-min slots, so a 60/120-min selection would never match and be wrongly rejected.
+    const durationMin = Math.max(1, Math.round((endsAt - startsAt) / 60));
+    const available = await getAvailableSlots(value.tech_id, { fromTs: Math.floor(Date.now() / 1000), toTs: Math.floor(Date.now() / 1000) + 14 * 86400, durationMin });
     if (!available.some(s => s.starts_at === startsAt && s.ends_at === endsAt)) {
       return fail(409, { form, error: 'That time slot is no longer offered for this tech. Pick a different one below.' });
     }
-    const result = createJob({ ...value, tech_id: value.tech_id, booked_by: locals.user.id,
+    const result = await createJob({ ...value, tech_id: value.tech_id, booked_by: locals.user.id,
       starts_at: startsAt, ends_at: endsAt,
       email: value.email || null, dob: value.dob || null, telus_pin: value.telus_pin || null,
       id_type: value.id_type || null, id_last4: value.id_last4 || null,
       emergency_name: value.emergency_name || null, emergency_number: value.emergency_number || null,
       emergency_relation: value.emergency_relation || null, verbal_password: value.verbal_password || null,
-      themes: value.themes || null, security_offered: value.security_offered || null, notes: value.notes || null
+      themes: value.themes || null, security_offered: value.security_offered || null, notes: value.notes || null,
+      phone: value.phone || null, price_cents: Math.round((value.price || 0) * 100),
+      lat: value.lat ?? null, lng: value.lng ?? null
     });
     if ('conflict' in result) return fail(409, { form, error: result.conflict === 'tech_busy' ? 'That tech is already booked at that time (or the slot was just taken).' : 'That time is outside the tech\'s posted availability. Add a block first or pick a different time.' });
     throw redirect(303, `/jobs/${result.id}`);
