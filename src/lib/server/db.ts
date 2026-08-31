@@ -725,10 +725,16 @@ export async function listJobsForTechs(fromTs: number, toTs: number, techIds: nu
   const rows = await d1All(`SELECT j.*, t.display_name AS tech_name, b.display_name AS booker_name FROM jobs j JOIN users t ON t.id=j.tech_id JOIN users b ON b.id=j.booked_by WHERE j.tech_id IN (${ph}) AND j.starts_at < ? AND j.ends_at > ? ORDER BY j.starts_at`, ...techIds, toTs, fromTs);
   return (rows as any[]).map(decryptJobRow);
 }
-// Safe boundary: summary queries select only non-PII fields and do not decrypt.
-// PII fields (dob, telus_pin, id_last4, emergency_*, verbal_password) are never
-// selected here, so they cannot be accidentally serialized.
-const SAFE_JOB_COLS = `j.id, j.tech_id, j.booked_by, j.client_name, j.address, j.lat, j.lng, j.starts_at, j.ends_at, j.status, j.completed_at, j.notes, j.email, j.id_type, j.svc_internet, j.svc_internet_detail, j.svc_home_phone, j.svc_home_phone_detail, j.svc_tv, j.svc_tv_detail, j.themes, j.security_offered, j.phone, j.price_cents, j.payout_cents, j.created_at, j.updated_at, t.display_name AS tech_name, b.display_name AS booker_name`;
+// Safe boundary: summary queries select only public-to-job-viewers fields and do
+// not decrypt. Classification per authorization semantics (not encrypted vs not):
+// - public-to-job-viewers: id, tech_id, booked_by, client_name, address, lat/lng,
+//   starts_at/ends_at, status, completed_at, notes, email, svc_*, themes,
+//   security_offered, price/payout, created/updated, tech/booker names
+// - private-to-owner/assigned-tech (owner = booked_by, tech = assigned): dob,
+//   telus_pin, id_type, id_last4, emergency_*, verbal_password, phone
+// - server-only: none currently (payout_cents is public for now)
+// Private fields are never selected here, so they cannot be leaked via page data.
+const SAFE_JOB_COLS = `j.id, j.tech_id, j.booked_by, j.client_name, j.address, j.lat, j.lng, j.starts_at, j.ends_at, j.status, j.completed_at, j.notes, j.email, j.svc_internet, j.svc_internet_detail, j.svc_home_phone, j.svc_home_phone_detail, j.svc_tv, j.svc_tv_detail, j.themes, j.security_offered, j.price_cents, j.payout_cents, j.created_at, j.updated_at, t.display_name AS tech_name, b.display_name AS booker_name`;
 export async function listJobsSummary(fromTs: number, toTs: number, techId?: number): Promise<JobWithTech[]>{
   let rows:any[];
   if (techId!=null) rows = await d1All(`SELECT ${SAFE_JOB_COLS} FROM jobs j JOIN users t ON t.id=j.tech_id JOIN users b ON b.id=j.booked_by WHERE j.tech_id = ? AND j.starts_at < ? AND j.ends_at > ? ORDER BY j.starts_at`, techId, toTs, fromTs);
