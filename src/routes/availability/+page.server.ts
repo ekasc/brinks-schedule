@@ -1,6 +1,6 @@
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
-import { listTemplates, setPatternsForTech, addUnavailable, removeUnavailable, listAllUnavailable, listJobs, listActiveUsers, findUserById } from '$lib/server/db';
+import { listTemplatesForTechs, setPatternsForTech, addUnavailable, removeUnavailable, listAllUnavailableForTechs, listJobsForTechs, listActiveUsers, findUserById } from '$lib/server/db';
 import { notifyUser } from '$lib/server/notifications';
 
 export const load: PageServerLoad = async ({ locals }) => {
@@ -11,11 +11,18 @@ export const load: PageServerLoad = async ({ locals }) => {
   const jobsByTech: Record<number, any[]> = {};
   const now = Math.floor(Date.now()/1000);
   const horizon = now + 60*86400;
-  for (const t of techs) {
-    templatesByTech[t.id] = await listTemplates(t.id);
-    const allUnavail = await listAllUnavailable(t.id);
-    unavailableByTech[t.id] = allUnavail.filter((u:any)=>u.ends_at > now).slice(0,50);
-    jobsByTech[t.id] = (await listJobs(now, horizon, t.id)).filter((j:any)=>j.status!=='cancelled').slice(0,20);
+  if (techs.length) {
+    const techIds = techs.map(t=> t.id);
+    const [allTemplates, allUnavailable, allJobs] = await Promise.all([
+      listTemplatesForTechs(techIds),
+      listAllUnavailableForTechs(techIds),
+      listJobsForTechs(now, horizon, techIds)
+    ]);
+    for (const t of techs) {
+      templatesByTech[t.id] = allTemplates.filter((r:any)=> r.tech_id === t.id);
+      unavailableByTech[t.id] = allUnavailable.filter((r:any)=> r.tech_id === t.id && r.ends_at > now).slice(0,50);
+      jobsByTech[t.id] = allJobs.filter((j:any)=> j.tech_id === t.id && j.status!=='cancelled').slice(0,20);
+    }
   }
   return {
     techs: techs.map(t => ({ id: t.id, display_name: t.display_name })),

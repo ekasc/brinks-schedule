@@ -283,6 +283,11 @@ export async function copyAvailabilityWeek(techId: number, fromWeekStartTs: numb
   return blocks.length;
 }
 export async function listTemplates(techId: number){ return await d1All(`SELECT * FROM availability_templates WHERE tech_id = ? ORDER BY dow, start_min`, techId) as AvailabilityTemplate[]; }
+export async function listTemplatesForTechs(techIds: number[]): Promise<AvailabilityTemplate[]>{
+  if (!techIds.length) return [];
+  const ph = techIds.map(()=> '?').join(',');
+  return await d1All(`SELECT * FROM availability_templates WHERE tech_id IN (${ph}) ORDER BY tech_id, dow, start_min`, ...techIds) as AvailabilityTemplate[];
+}
 export async function addTemplate(techId: number, dow: number, startMin: number, endMin: number, note: string|null, kind: 'available'|'unavailable'='available'){ const r:any = await d1Run(`INSERT INTO availability_templates (tech_id, dow, start_min, end_min, kind, note) VALUES (?, ?, ?, ?, ?, ?)`, techId, dow, startMin, endMin, kind, note); return Number(r.lastInsertRowid ?? r.meta?.last_row_id ?? 0); }
 export async function removeTemplate(id: number, techId: number){ await d1Run(`DELETE FROM availability_templates WHERE id = ? AND tech_id = ?`, id, techId); }
 // Pattern helpers
@@ -324,6 +329,11 @@ export async function setPatternsForDow(techId: number, dow: number, intervals: 
 export async function addUnavailable(techId: number, startsAt: number, endsAt: number, reason: string|null){ const r:any = await d1Run(`INSERT INTO availability_unavailable (tech_id, starts_at, ends_at, reason) VALUES (?, ?, ?, ?)`, techId, startsAt, endsAt, reason); return Number(r.lastInsertRowid ?? r.meta?.last_row_id ?? 0); }
 export async function listUnavailable(techId: number, fromTs: number, toTs: number){ return await d1All(`SELECT * FROM availability_unavailable WHERE tech_id = ? AND starts_at < ? AND ends_at > ? ORDER BY starts_at`, techId, toTs, fromTs) as AvailabilityUnavailable[]; }
 export async function listAllUnavailable(techId: number){ return await d1All(`SELECT * FROM availability_unavailable WHERE tech_id = ? ORDER BY starts_at`, techId) as AvailabilityUnavailable[]; }
+export async function listAllUnavailableForTechs(techIds: number[]): Promise<AvailabilityUnavailable[]>{
+  if (!techIds.length) return [];
+  const ph = techIds.map(()=> '?').join(',');
+  return await d1All(`SELECT * FROM availability_unavailable WHERE tech_id IN (${ph}) ORDER BY tech_id, starts_at`, ...techIds) as AvailabilityUnavailable[];
+}
 export async function removeUnavailable(id: number, techId: number){ await d1Run(`DELETE FROM availability_unavailable WHERE id = ? AND tech_id = ?`, id, techId); }
 export async function applyTemplates(techId: number, weekStartTs: number): Promise<number>{
   const templates = (await listTemplates(techId)).filter((t:any)=>(t.kind ?? 'available')==='available'); if (!templates.length) return 0;
@@ -573,10 +583,23 @@ export async function completePushDelivery(id:number){ await d1Run(`UPDATE push_
 export async function retryPushDelivery(id:number,nextAttemptAt:number,error:string){ await d1Run(`UPDATE push_deliveries SET next_attempt_at=?,last_error=?,lease_until=NULL,lease_token=NULL WHERE id=?`,nextAttemptAt,error,id); }
 export async function generateDailySummaryNotifications(fromTs:number,toTs:number,localDate:string){
   const users:any[]=await d1All(`SELECT id,role FROM users WHERE is_active=1 AND role IN ('tech','sales')`);
+  if (!users.length) return 0;
+  const techIds = users.filter((u:any)=> u.role==='tech').map((u:any)=> u.id);
+  const salesIds = users.filter((u:any)=> u.role==='sales').map((u:any)=> u.id);
+  const counts = new Map<number, number>();
+  if (techIds.length){
+    const ph = techIds.map(()=> '?').join(',');
+    const rows:any[] = await d1All(`SELECT tech_id as uid, COUNT(*) as c FROM jobs WHERE status!='cancelled' AND starts_at>=? AND starts_at<? AND tech_id IN (${ph}) GROUP BY tech_id`, fromTs, toTs, ...techIds);
+    for (const r of rows) counts.set(Number(r.uid), Number(r.c));
+  }
+  if (salesIds.length){
+    const ph = salesIds.map(()=> '?').join(',');
+    const rows:any[] = await d1All(`SELECT booked_by as uid, COUNT(*) as c FROM jobs WHERE status!='cancelled' AND starts_at>=? AND starts_at<? AND booked_by IN (${ph}) GROUP BY booked_by`, fromTs, toTs, ...salesIds);
+    for (const r of rows) counts.set(Number(r.uid), Number(r.c));
+  }
   let created=0;
   for(const user of users){
-    const row:any=await d1Get(`SELECT COUNT(*) c FROM jobs WHERE status!='cancelled' AND starts_at>=? AND starts_at<? AND ${user.role==='tech'?'tech_id':'booked_by'}=?`,fromTs,toTs,user.id);
-    const count=Number(row?.c??0); if(!count) continue;
+    const count = counts.get(Number(user.id)) ?? 0; if(!count) continue;
     const id=await createNotification(user.id,'Today’s schedule',`${count} ${count===1?'job':'jobs'} scheduled today.`, '/', `daily:${localDate}`);
     if(id) created++;
   }
@@ -596,70 +619,63 @@ export async function reconcileJobNotifications(){
   }
   return repaired;
 }
-export async function getAvailableSlots(techId: number, opts: any={}): Promise<{starts_at:number; ends_at:number}[]>{
-  const fromTs = opts.fromTs ?? Math.floor(Date.now()/1000); const horizon = new Date(); horizon.setDate(horizon.getDate()+SLOT_HORIZON_DAYS); const toTs = opts.toTs ?? Math.floor(horizon.getTime()/1000);
-  const dur = (opts.durationMin ?? 90)*60; const step=(opts.stepMin ??30)*60; const buf=(opts.bufferMin ?? BUFFER_MIN)*60;
+async function fetchAvailabilityRaw(techId: number, fromTs: number, toTs: number, buf: number){
   const templates = await listTemplates(techId);
   const extraBlocks = await listAvailability(techId, fromTs, toTs);
+  const unavailable = await listUnavailable(techId, fromTs, toTs);
+  const jobs = (await listJobs(fromTs-buf, toTs+buf, techId)).filter((j:any)=>j.status!=='cancelled');
+  return { templates, extraBlocks, unavailable, jobs };
+}
+export async function getAvailableSlots(techId: number, opts: any={}): Promise<{starts_at:number; ends_at:number}[]>{
+  const dur = opts.durationMin ?? 90;
+  const batch = await getAvailableSlotsForDurations(techId, opts, [dur]);
+  return batch[dur] ?? [];
+}
+// Batch: fetch raw once, slice for each duration — invariant: raw intervals are independent of durationMin.
+export async function getAvailableSlotsForDurations(techId: number, baseOpts: any, durations: number[]): Promise<Record<number, {starts_at:number; ends_at:number}[]>>{
+  const fromTs = baseOpts.fromTs ?? Math.floor(Date.now()/1000); const horizon = new Date(); horizon.setDate(horizon.getDate()+SLOT_HORIZON_DAYS); const toTs = baseOpts.toTs ?? Math.floor(horizon.getTime()/1000);
+  const step=(baseOpts.stepMin ??30)*60; const buf=(baseOpts.bufferMin ?? BUFFER_MIN)*60;
+  const { templates, extraBlocks, unavailable, jobs } = await fetchAvailabilityRaw(techId, fromTs, toTs, buf);
   const availableTemplates = templates.filter((t:any)=> (t.kind ?? 'available') === 'available');
   const unavailableTemplates = templates.filter((t:any)=> t.kind === 'unavailable');
   const expanded: {starts_at:number; ends_at:number}[] = [];
-  // DST-safe expansion: available templates into intervals
   if (availableTemplates.length) {
     const cur = new Date(fromTs*1000); cur.setHours(0,0,0,0);
     while (Math.floor(cur.getTime()/1000) < toTs) {
-      const dow = cur.getDay();
-      const base = Math.floor(cur.getTime()/1000);
+      const dow = cur.getDay(); const base = Math.floor(cur.getTime()/1000);
       for (const t of availableTemplates) if (t.dow===dow) {
         const s = base + t.start_min*60; const e = base + t.end_min*60;
-        if (e<=s) continue;
-        const cs = Math.max(s, fromTs); const ce = Math.min(e, toTs);
-        if (ce>cs) expanded.push({starts_at: cs, ends_at: ce});
-      }
-      cur.setDate(cur.getDate()+1);
+        if (e<=s) continue; const cs=Math.max(s,fromTs); const ce=Math.min(e,toTs); if(ce>cs) expanded.push({starts_at:cs, ends_at:ce});
+      } cur.setDate(cur.getDate()+1);
     }
   }
-  for (const b of extraBlocks) expanded.push({starts_at: b.starts_at, ends_at: b.ends_at});
-  if (!expanded.length) return [];
-  const unavailable = await listUnavailable(techId, fromTs, toTs);
-  const jobs = (await listJobs(fromTs-buf, toTs+buf, techId)).filter((j:any)=>j.status!=='cancelled');
+  for (const b of extraBlocks) expanded.push({starts_at:b.starts_at, ends_at:b.ends_at});
+  if (!expanded.length){ const empty: Record<number,any>={}; for(const d of durations) empty[d]=[]; return empty; }
   const blocked: {start:number; end:number}[] = [];
-  for (const u of unavailable) blocked.push({start: u.starts_at, end: u.ends_at});
-  for (const j of jobs) blocked.push({start: j.starts_at-buf, end: j.ends_at+buf});
-  // expand unavailable templates into blocked intervals
-  if (unavailableTemplates.length) {
-    const cur = new Date(fromTs*1000); cur.setHours(0,0,0,0);
-    while (Math.floor(cur.getTime()/1000) < toTs) {
-      const dow = cur.getDay();
-      const base = Math.floor(cur.getTime()/1000);
-      for (const t of unavailableTemplates) if (t.dow===dow) {
-        const s = base + t.start_min*60; const e = base + t.end_min*60;
-        if (e<=s) continue;
-        const cs = Math.max(s, fromTs); const ce = Math.min(e, toTs);
-        if (ce>cs) blocked.push({start: cs, end: ce});
+  for (const u of unavailable) blocked.push({start:u.starts_at, end:u.ends_at});
+  for (const j of jobs) blocked.push({start:j.starts_at-buf, end:j.ends_at+buf});
+  if (unavailableTemplates.length){
+    const cur=new Date(fromTs*1000); cur.setHours(0,0,0,0);
+    while (Math.floor(cur.getTime()/1000) < toTs){
+      const dow=cur.getDay(); const base=Math.floor(cur.getTime()/1000);
+      for(const t of unavailableTemplates) if(t.dow===dow){
+        const s=base+t.start_min*60; const e=base+t.end_min*60; if(e<=s) continue; const cs=Math.max(s,fromTs); const ce=Math.min(e,toTs); if(ce>cs) blocked.push({start:cs, end:ce});
+      } cur.setDate(cur.getDate()+1);
+    }
+  }
+  function isBlocked(s:number,e:number){ for(const b of blocked) if(s<b.end && e>b.start) return true; return false; }
+  const nowSec=Math.floor(Date.now()/1000);
+  const out: Record<number,any>={};
+  for(const durationMin of durations){
+    const dur=durationMin*60; const seen=new Set<string>(); const slots:any[]=[];
+    for(const blk of expanded){
+      let s=Math.max(blk.starts_at, fromTs); const sDate=new Date(s*1000); const sMin=sDate.getMinutes();
+      if(sMin!==0 && sMin!==30){ const bump=30-(sMin%30); s+=bump*60; }
+      while(s+dur<=blk.ends_at && s+dur<=toTs){
+        const e=s+dur; const key=`${s}-${e}`; if(s>=nowSec && !isBlocked(s,e) && !seen.has(key)){ seen.add(key); slots.push({starts_at:s, ends_at:e}); } s+=step;
       }
-      cur.setDate(cur.getDate()+1);
     }
-  }
-  function isBlocked(s:number,e:number){
-    for (const b of blocked) if (s < b.end && e > b.start) return true;
-    return false;
-  }
-  // also need to ensure slot is not overlapped by unavailable even partially subtracted — isBlocked already covers.
-  // But also need to ensure slot is fully inside a single interval (not spanning gap between two intervals).
-  // Our generation iterates per interval, so each slot will be inside its source interval.
-  // However unavailable may split an interval — isBlocked handles by rejecting overlapping slots.
-  const out:any[]=[]; const seen=new Set<string>();
-  const nowSec = Math.floor(Date.now()/1000);
-  for(const blk of expanded){
-    let s=Math.max(blk.starts_at, fromTs);
-    const sDate=new Date(s*1000); const sMin=sDate.getMinutes();
-    if(sMin!==0 && sMin!==30){ const bump=30-(sMin%30); s+=bump*60; }
-    while(s+dur<=blk.ends_at && s+dur<=toTs){
-      const e=s+dur; const key=`${s}-${e}`;
-      if(s>=nowSec && !isBlocked(s,e) && !seen.has(key)){ seen.add(key); out.push({starts_at:s, ends_at:e}); }
-      s+=step;
-    }
+    out[durationMin]=slots;
   }
   return out;
 }
@@ -701,6 +717,12 @@ export async function listJobs(fromTs: number, toTs: number, techId?: number){
   else rows = await d1All(`SELECT j.*, t.display_name AS tech_name, b.display_name AS booker_name FROM jobs j JOIN users t ON t.id=j.tech_id JOIN users b ON b.id=j.booked_by WHERE j.starts_at < ? AND j.ends_at > ? ORDER BY j.starts_at`, toTs, fromTs);
   return (rows as any[]).map(decryptJobRow);
 }
+export async function listJobsForTechs(fromTs: number, toTs: number, techIds: number[]): Promise<JobWithTech[]>{
+  if (!techIds.length) return [];
+  const ph = techIds.map(()=> '?').join(',');
+  const rows = await d1All(`SELECT j.*, t.display_name AS tech_name, b.display_name AS booker_name FROM jobs j JOIN users t ON t.id=j.tech_id JOIN users b ON b.id=j.booked_by WHERE j.tech_id IN (${ph}) AND j.starts_at < ? AND j.ends_at > ? ORDER BY j.starts_at`, ...techIds, toTs, fromTs);
+  return (rows as any[]).map(decryptJobRow);
+}
 export async function getIncomeForUser(userId: number, role: string, fromTs?: number, toTs?: number){
   let where=''; const params:any[]=[];
   if (role==='tech'){ where='tech_id = ?'; params.push(userId); }
@@ -724,20 +746,37 @@ export async function getAllIncomeSummary(fromTs?: number, toTs?: number){
 }
 export async function getTeamStats(fromTs?: number, toTs?: number){
   const users = (await listUsers()).filter((u:any)=>u.is_active!==0);
+  if (!users.length) return [];
+  // Batch job aggregates in one query + blocks in one query, then compute per-user in JS.
+  // Invariant: per-user counts are GROUP BY projections, not per-user round-trips.
+  let jobsWhere = '1=1'; const jobParams:any[]=[];
+  if (fromTs!=null && toTs!=null){ jobsWhere+=' AND starts_at >= ? AND starts_at < ?'; jobParams.push(fromTs,toTs); }
+  const allJobs:any[] = await d1All(`SELECT tech_id, booked_by, status, completed_at, payout_cents FROM jobs WHERE ${jobsWhere}`, ...jobParams);
+  let blocksByTech: Record<number, number> = {};
+  const techIds = users.filter((u:any)=> u.role==='tech' || u.role==='admin').map((u:any)=> u.id);
+  if (techIds.length){
+    const ph = techIds.map(()=> '?').join(',');
+    let blockWhere = `tech_id IN (${ph})`; const blockParams:any[]=[...techIds];
+    if (fromTs!=null && toTs!=null){ blockWhere+= ' AND starts_at >= ? AND starts_at < ?'; blockParams.push(fromTs,toTs); }
+    const blockRows:any[] = await d1All(`SELECT tech_id, COUNT(*) as c FROM availability_blocks WHERE ${blockWhere} GROUP BY tech_id`, ...blockParams);
+    for (const r of blockRows) blocksByTech[Number(r.tech_id)] = Number(r.c);
+  }
   const out:any[]=[];
   for(const u of users){
-    const role=u.role; let where=''; const params:any[]=[];
-    if (role==='tech'){ where='tech_id = ?'; params.push(u.id); }
-    else if (role==='sales'){ where='booked_by = ?'; params.push(u.id); }
-    else { where='(tech_id = ? OR booked_by = ?)'; params.push(u.id,u.id); }
-    if (fromTs!=null && toTs!=null){ where+=' AND starts_at >= ? AND starts_at < ?'; params.push(fromTs,toTs); }
-    const row:any = await d1Get(`SELECT COUNT(*) as total, COALESCE(SUM(CASE WHEN status='signed' THEN 1 ELSE 0 END),0) as signed, COALESCE(SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END),0) as sent, COALESCE(SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END),0) as cancelled, COALESCE(SUM(CASE WHEN completed_at IS NOT NULL THEN 1 ELSE 0 END),0) as completed, COALESCE(SUM(payout_cents),0) as total_cents, COALESCE(SUM(CASE WHEN status='signed' THEN payout_cents ELSE 0 END),0) as earned_cents FROM jobs WHERE ${where}`, ...params);
-    let blocks:any=0;
-    if (role==='tech' || role==='admin'){
-      if (fromTs!=null && toTs!=null) blocks = await d1Get(`SELECT COUNT(*) as c FROM availability_blocks WHERE tech_id=? AND starts_at >= ? AND starts_at < ?`, u.id, fromTs, toTs);
-      else blocks = await d1Get(`SELECT COUNT(*) as c FROM availability_blocks WHERE tech_id=?`, u.id);
-      blocks = (blocks as any)?.c ?? 0;
-    }
+    const filtered = allJobs.filter((j:any)=>{
+      if (u.role==='tech') return j.tech_id===u.id;
+      if (u.role==='sales') return j.booked_by===u.id;
+      return j.tech_id===u.id || j.booked_by===u.id;
+    });
+    const total = filtered.length;
+    const signed = filtered.filter((j:any)=> j.status==='signed').length;
+    const sent = filtered.filter((j:any)=> j.status==='sent').length;
+    const cancelled = filtered.filter((j:any)=> j.status==='cancelled').length;
+    const completed = filtered.filter((j:any)=> j.completed_at!=null).length;
+    const total_cents = filtered.reduce((s:number,j:any)=> s + (Number(j.payout_cents)||0),0);
+    const earned_cents = filtered.filter((j:any)=> j.status==='signed').reduce((s:number,j:any)=> s + (Number(j.payout_cents)||0),0);
+    const row:any = { total, signed, sent, cancelled, completed, total_cents, earned_cents };
+    const blocks = (u.role==='tech' || u.role==='admin') ? (blocksByTech[u.id] ?? 0) : 0;
     const conversion = row.total?Math.round((row.signed/row.total)*100):0;
     const completion = row.signed?Math.round((row.completed/row.signed)*100):0;
     out.push({ id:u.id, display_name:u.display_name, role:u.role, ...row, blocks, conversion, completion });

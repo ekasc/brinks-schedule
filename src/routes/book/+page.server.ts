@@ -3,7 +3,7 @@ import { superValidate } from 'sveltekit-superforms/server';
 import { zod4 } from 'sveltekit-superforms/adapters';
 import type { Actions, PageServerLoad } from './$types';
 import { bookJobSchema } from '$lib/schemas/book';
-import { listActiveUsers, createJob, getAvailableSlots, SLOT_HORIZON_DAYS } from '$lib/server/db';
+import { listActiveUsers, createJob, getAvailableSlots, getAvailableSlotsForDurations, SLOT_HORIZON_DAYS } from '$lib/server/db';
 import { geocode } from '$lib/server/geocode';
 import { normalizeDuration, normalizeTechSelection } from '$lib/server/bookingSelection';
 import { notifyJobCreated } from '$lib/server/notifications';
@@ -18,9 +18,10 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   const slotsByTech: Record<number, { starts_at: number; ends_at: number }[]> = {};
   const slotsByTechByDuration: Record<number, Record<number, { starts_at: number; ends_at: number }[]>> = {};
   for (const t of techs) {
-    slotsByTech[t.id] = await getAvailableSlots(t.id, { durationMin });
-    slotsByTechByDuration[t.id] = {};
-    for (const d of allDurations) slotsByTechByDuration[t.id][d] = await getAvailableSlots(t.id, { durationMin: d });
+    // Fetch raw intervals once per tech and slice for each duration — eliminates 3 duplicate DB reads per tech.
+    const batch = await getAvailableSlotsForDurations(t.id, {}, allDurations as unknown as number[]);
+    slotsByTechByDuration[t.id] = batch as Record<number, { starts_at: number; ends_at: number }[]>;
+    slotsByTech[t.id] = batch[durationMin] ?? [];
   }
   return {
     form: await superValidate(zod4(bookJobSchema as any)),
