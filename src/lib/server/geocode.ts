@@ -17,11 +17,21 @@ const provider = (env.GEOCODER || 'photon').toLowerCase();
 const userAgent = env.GEOCODER_UA || 'schedule/1.0 (scheduling app)';
 const countrycodes = env.GEOCODER_COUNTRY || 'ca'; // used only by nominatim
 
-let lastCall = 0;
-async function throttle(minGapMs = 1100) {
-  const wait = lastCall + minGapMs - Date.now();
+// Throttling is per upstream provider, not per operation — photon and nominatim
+// have independent rate limits. Within a provider, geocode and autocomplete share
+// the same bucket (the provider does not distinguish them). This is still
+// per-isolate, not global across isolates, so it is best-effort.
+let lastCallPhoton = 0;
+let lastCallNominatim = 0;
+async function throttlePhoton(minGapMs = 200) {
+  const wait = lastCallPhoton + minGapMs - Date.now();
   if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-  lastCall = Date.now();
+  lastCallPhoton = Date.now();
+}
+async function throttleNominatim(minGapMs = 1100) {
+  const wait = lastCallNominatim + minGapMs - Date.now();
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  lastCallNominatim = Date.now();
 }
 
 function photonLabel(p: Record<string, unknown>): string {
@@ -53,7 +63,7 @@ export async function geocode(address: string): Promise<Coords | null> {
   let result: Coords | null = null;
   if (provider === 'photon') {
     try {
-      await throttle(200);
+      await throttlePhoton(200);
       const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(address)}&limit=1&lang=en`;
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 4000);
@@ -71,7 +81,7 @@ export async function geocode(address: string): Promise<Coords | null> {
     }
   } else if (provider === 'nominatim') {
     try {
-      await throttle();
+      await throttleNominatim();
       const url =
         'https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=0' +
         '&countrycodes=' + encodeURIComponent(countrycodes) +
@@ -107,7 +117,7 @@ export async function autocomplete(query: string, limit = 5): Promise<Suggestion
   if (!q || provider === 'none') return [];
   if (provider === 'photon') {
     try {
-      await throttle(200);
+      await throttlePhoton(200);
       const url = `https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=${Math.min(limit, 10)}&lang=en`;
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 4000);
@@ -127,7 +137,7 @@ export async function autocomplete(query: string, limit = 5): Promise<Suggestion
   }
   // nominatim fallback
   try {
-    await throttle();
+    await throttleNominatim();
     const url =
       'https://nominatim.openstreetmap.org/search?format=json&addressdetails=1&limit=' +
       Math.min(limit, 10) +
