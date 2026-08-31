@@ -6,6 +6,7 @@
   import { Select, Button, Calendar, Popover } from 'bits-ui';
   import { CalendarDate, parseDate, today, getLocalTimeZone } from '@internationalized/date';
   import { cubicOut } from 'svelte/easing';
+  import { onMount } from 'svelte';
   import type { PageData, ActionData } from './$types';
   export let data: PageData;
   export let form: ActionData;
@@ -30,7 +31,6 @@
   $: svcInternet = $bookForm.svc_internet;
   $: svcHomePhone = $bookForm.svc_home_phone;
   $: svcTv = $bookForm.svc_tv;
-  $: themes = $bookForm.themes;
   $: securityOffered = $bookForm.security_offered;
   $: notes = $bookForm.notes;
   let busy = false;
@@ -55,10 +55,15 @@
   }
 
   $: slots = (data.slotsByTechByDuration?.[techId]?.[durationMin] ?? data.slotsByTech[techId] ?? []);
+  function localDateKey(ts:number) {
+    const d = new Date(ts * 1000);
+    const p = (n:number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+  }
   $: slotsByDay = (() => {
     const map = new Map<string, { starts_at: number; ends_at: number }[]>();
     for (const s of slots) {
-      const key = new Date(s.starts_at * 1000).toISOString().slice(0, 10);
+      const key = localDateKey(s.starts_at);
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(s);
     }
@@ -75,13 +80,15 @@
   $: calMonthLabel = calCursor.toLocaleDateString(undefined,{month:'long',year:'numeric'});
   $: calFirstWeekday = new Date(calYear, calMonth, 1).getDay();
   $: calDaysInMonth = new Date(calYear, calMonth+1, 0).getDate();
-  $: calSlotsMap = new Map(slotsByDay);
+  function slotsForCalendarDay(iso:string) {
+    return slots.filter(s => localDateKey(s.starts_at) === iso);
+  }
   let calSelectedDay: string | null = null;
   $: if (!calSelectedDay && slotsByDay.length) calSelectedDay = slotsByDay[0][0];
   function calPrev(){ calCursor = new Date(calYear, calMonth-1, 1); }
   function calNext(){ calCursor = new Date(calYear, calMonth+1, 1); }
-  function calDateToIso(day:number){
-    const m=String(calMonth+1).padStart(2,'0'); const d=String(day).padStart(2,'0'); return `${calYear}-${m}-${d}`;
+  function calDateToIso(year:number, month:number, day:number){
+    const m=String(month+1).padStart(2,'0'); const d=String(day).padStart(2,'0'); return `${year}-${m}-${d}`;
   }
   function relativeDayLabel(iso:string){
     if(iso===todayIso) return 'Today';
@@ -133,6 +140,37 @@
   ];
   const inpc = 'w-full bg-transparent py-0 text-[var(--t-17)] text-[var(--ink)] outline-none placeholder:text-[var(--dim)]';
 
+  function autoFocus(node: HTMLInputElement) {
+    requestAnimationFrame(() => node.focus());
+  }
+
+  // --- Desktop ToC — column of section headers (Apple: restraint, spatial consistency) ---
+  let tocActive = 'sec-customer';
+  function tocScrollTo(id: string) {
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  $: tocItems = [
+    { id: 'sec-customer', label: 'Customer' },
+    { id: 'sec-telus', label: 'TELUS account' },
+    { id: 'sec-services', label: 'Services the customer has' },
+    { id: 'sec-emergency', label: 'Emergency contact' },
+    { id: 'sec-verbal', label: 'Verbal password' },
+    { id: 'sec-security', label: 'Home security being offered' },
+    { id: 'sec-schedule', label: 'Schedule' },
+    { id: 'sec-time', label: 'Time' },
+    { id: 'sec-pricing', label: 'Pricing' },
+    { id: 'sec-book', label: 'Book job' }
+  ];
+  onMount(() => {
+    const ids = tocItems.map(t => t.id);
+    const observer = new IntersectionObserver((entries) => {
+      const visible = entries.filter(e => e.isIntersecting).sort((a,b) => b.intersectionRatio - a.intersectionRatio);
+      if (visible[0]) tocActive = visible[0].target.id;
+    }, { rootMargin: '-25% 0px -60% 0px', threshold: [0, 0.25, 0.5, 1] });
+    ids.forEach(id => { const el = document.getElementById(id); if (el) observer.observe(el); });
+    return () => observer.disconnect();
+  });
+
   // --- DOB bits calendar ---
   let dobOpen = false;
   $: dobCal = $bookForm.dob ? (() => { try { return parseDate($bookForm.dob); } catch { return undefined; } })() : undefined;
@@ -177,9 +215,25 @@
 
 <svelte:head><title>New job</title></svelte:head>
 
-<div class="mt-8 mb-8 px-4">
+<div class="mt-8 mb-2 px-4">
   <h1 class="text-[28px] font-bold tracking-tight">New job</h1>
 </div>
+<p class="mb-6 px-4 text-[13px] text-[var(--dim)]" aria-hidden="true"><span class="text-[var(--red)]">*</span> Required</p>
+
+<!-- Desktop ToC — minimal left column (Apple: restraint) -->
+<nav aria-label="Sections" class="hidden xl:block fixed left-[calc(50%-552px)] top-[118px] w-[160px] z-20 select-none">
+  <div class="py-1">
+    <span class="block text-[10px] font-semibold tracking-[0.08em] uppercase text-[var(--dim2)] mb-2 px-2">On this page</span>
+    <ol class="border-l border-[var(--line-thin)] ml-2">
+      {#each tocItems as item}
+        {@const active = tocActive === item.id}
+        <li>
+          <button type="button" onclick={() => tocScrollTo(item.id)} class="w-full text-left pl-3 pr-2 py-[3px] -ml-px border-l-2 text-[11.5px] leading-[1.3] tracking-tight transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--blue)] {active ? 'border-[var(--blue)] text-[var(--blue)] font-semibold' : 'border-transparent text-[var(--dim)] hover:text-[var(--ink)] font-normal'}">{item.label}</button>
+        </li>
+      {/each}
+    </ol>
+  </div>
+</nav>
 
 {#if form?.error}
   <div class="form-section">
@@ -189,24 +243,28 @@
 
 <form method="POST" use:enhance novalidate class="pb-8">
   <!-- Customer -->
-  <div class="group">
+  <div id="sec-customer" class="group scroll-mt-24">
     <div class="group-title">Customer</div>
     <div class="input-group">
       <label class="field">
-        <span class="key">Full name</span>
-        <input class={inpc} name="client_name" bind:value={$bookForm.client_name} required autocomplete="name" placeholder="Full name" aria-label="Full name" aria-invalid={$errors.client_name ? "true" : undefined} style:border-color={$errors.client_name ? "var(--red)" : undefined} />
+        <input class={inpc} name="client_name" bind:value={$bookForm.client_name} required aria-required="true" autocomplete="name" placeholder="Full name *" aria-label="Full name (required)" aria-invalid={$errors.client_name ? "true" : undefined} style:border-color={$errors.client_name ? "var(--red)" : undefined} />
       {#if $errors.client_name}<span class="px-1 pt-1 text-[13px] leading-tight text-[var(--red)]" transition:fly={{ y: -4, duration: 160, easing: cubicOut }}>{$errors.client_name}</span>{/if}</label>
-      <AddressAutocomplete name="address" bind:value={$bookForm.address} bind:lat={selLat} bind:lng={selLng} placeholder="Address" ariaLabel="Address" error={$errors.address} showKey={true} />
+      <span id="sec-customer-addr" class="block scroll-mt-28" aria-hidden="true"></span>
+      <AddressAutocomplete name="address" bind:value={$bookForm.address} bind:lat={selLat} bind:lng={selLng} placeholder="Address *" ariaLabel="Address (required)" error={$errors.address} showKey={false} required />
+      {#if $bookForm.address?.trim()}
+        {#if selLat != null && selLng != null}
+          <span class="px-1 pt-1 text-[13px] leading-tight text-[var(--blue)]">✓ Map location set — this job will appear on the route map.</span>
+        {:else}
+          <span class="px-1 pt-1 text-[13px] leading-tight text-[var(--dim)]">No map location selected. If this address can’t be matched, the job will still be booked but won’t appear on the route map.</span>
+        {/if}
+      {/if}
       <label class="field">
-        <span class="key">Email — optional</span>
-        <input class={inpc} name="email" type="email" bind:value={$bookForm.email} autocomplete="email" placeholder="Email — optional" aria-label="Email" aria-invalid={$errors.email ? "true" : undefined} />
+        <input class={inpc} name="email" type="email" bind:value={$bookForm.email} autocomplete="email" placeholder="Email" aria-label="Email" aria-invalid={$errors.email ? "true" : undefined} />
       {#if $errors.email}<span class="px-1 pt-1 text-[13px] leading-tight text-[var(--red)]" transition:fly={{ y: -4, duration: 160, easing: cubicOut }}>{$errors.email}</span>{/if}</label>
       <label class="field">
-        <span class="key">Phone — optional</span>
-        <input class={inpc} name="phone" bind:value={$bookForm.phone} type="tel" autocomplete="tel" placeholder="Phone — optional" aria-label="Phone number" aria-invalid={$errors.phone ? "true" : undefined} />
+        <input class={inpc} name="phone" bind:value={$bookForm.phone} type="tel" autocomplete="tel" placeholder="Phone" aria-label="Phone number" aria-invalid={$errors.phone ? "true" : undefined} />
       {#if $errors.phone}<span class="px-1 pt-1 text-[13px] leading-tight text-[var(--red)]" transition:fly={{ y: -4, duration: 160, easing: cubicOut }}>{$errors.phone}</span>{/if}</label>
       <label class="field">
-        <span class="key">Date of birth</span>
         <Popover.Root bind:open={dobOpen}>
           <Popover.Trigger>
             {#snippet child({ props })}
@@ -267,15 +325,13 @@
   </div>
 
   <!-- TELUS account -->
-  <div class="group">
+  <div id="sec-telus" class="group scroll-mt-24">
     <div class="group-title">TELUS account</div>
     <div class="input-group">
       <label class="field">
-        <span class="key">4-digit PIN</span>
         <input class={inpc} name="telus_pin" bind:value={$bookForm.telus_pin} inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="4-digit PIN" aria-label="4-digit PIN" aria-invalid={$errors.telus_pin ? "true" : undefined} />
       {#if $errors.telus_pin}<span class="px-1 pt-1 text-[13px] leading-tight text-[var(--red)]" transition:fly={{ y: -4, duration: 160, easing: cubicOut }}>{$errors.telus_pin}</span>{/if}</label>
       <label class="field">
-        <span class="key">ID type</span>
         <Select.Root type="single" name="id_type" bind:value={$bookForm.id_type} items={idTypes}>
           <Select.Trigger class={inpc + ' flex cursor-pointer items-center justify-between text-left data-[placeholder]:!text-[var(--dim)]'} aria-label="ID type"><Select.Value placeholder="ID type" /><svg width="12" height="8" viewBox="0 0 12 8" fill="none" aria-hidden="true" class="ml-2 shrink-0 text-[var(--dim)]"><path d="M1 1.5L6 6.5L11 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></Select.Trigger>
           <Select.Portal>
@@ -288,70 +344,106 @@
         </Select.Root>
       </label>
       <label class="field">
-        <span class="key">Last 4 of ID</span>
         <input class={inpc} name="id_last4" bind:value={$bookForm.id_last4} inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="Last 4 of ID" aria-label="Last 4 of ID" aria-invalid={$errors.id_last4 ? "true" : undefined} />
       {#if $errors.id_last4}<span class="px-1 pt-1 text-[13px] leading-tight text-[var(--red)]" transition:fly={{ y: -4, duration: 160, easing: cubicOut }}>{$errors.id_last4}</span>{/if}</label>
     </div>
   </div>
 
   <!-- Services -->
-  <div class="group">
+  <div id="sec-services" class="group scroll-mt-24">
     <div class="group-title">Services the customer has</div>
-    <div class="group-rows">
-      <label class="row-line gap-3 cursor-pointer">
-        <input type="checkbox" name="svc_internet" bind:checked={$bookForm.svc_internet} class="!w-5 !min-h-5 accent-[var(--blue)]" />
-        <span class="label">Internet</span>
-        <span class="chev ml-auto">{svcInternet ? 'Yes' : ''}</span></label>
-      <label class="row-line gap-3 cursor-pointer">
-        <input type="checkbox" name="svc_home_phone" bind:checked={$bookForm.svc_home_phone} class="!w-5 !min-h-5 accent-[var(--blue)]" />
-        <span class="label">Home phone</span>
-        <span class="chev ml-auto">{svcHomePhone ? 'Yes' : ''}</span></label>
-      <label class="row-line gap-3 cursor-pointer">
-        <input type="checkbox" name="svc_tv" bind:checked={$bookForm.svc_tv} class="!w-5 !min-h-5 accent-[var(--blue)]" />
-        <span class="label">TV</span>
-        <span class="chev ml-auto">{svcTv ? 'Yes' : ''}</span></label>
+    <div class="group-rows divide-y divide-[var(--line-thin)]">
+      <!-- Internet -->
+      <div class="flex items-center gap-3 px-4 py-3 min-h-[56px] transition-colors duration-200 {svcInternet ? 'bg-[color-mix(in_srgb,var(--blue)_4%,var(--row))]' : 'bg-[var(--row)]'}">
+        <label class="flex items-center gap-3 cursor-pointer shrink-0 select-none">
+          <input type="checkbox" name="svc_internet" bind:checked={$bookForm.svc_internet} class="h-5 w-5 rounded-[6px] border-[1.5px] border-[var(--line)] bg-[var(--row2)] accent-[var(--blue)] checked:border-[var(--blue)] focus-visible:ring-2 focus-visible:ring-[var(--blue)] focus-visible:ring-offset-0 transition-colors" />
+          <span class="text-[15px] font-medium tracking-tight {svcInternet ? 'text-[var(--ink)]' : 'text-[var(--ink)]'}">Internet</span>
+        </label>
+        {#if svcInternet}
+          <div class="flex flex-1 items-center gap-3 min-w-0 ml-2 sm:ml-4" in:fly={{ x: 10, duration: 260, easing: cubicOut }} out:fly={{ x: 8, duration: 140 }}>
+            <span class="hidden sm:block h-6 w-px bg-[var(--line)] shrink-0 opacity-60"></span>
+            <div class="relative flex-1">
+              <input use:autoFocus class="w-full bg-[var(--bg)] sm:bg-[var(--row2)] border border-[var(--line)] rounded-[10px] px-3.5 py-2.5 pr-8 text-[14px] leading-none text-[var(--ink)] placeholder:text-[var(--dim2)] placeholder:text-[13px] shadow-[inset_0_1px_2px_rgba(0,0,0,0.06)] focus:bg-[var(--row)] focus:border-[var(--blue)] focus:shadow-[0_0_0_4px_color-mix(in_srgb,var(--blue)_14%,transparent),inset_0_1px_2px_rgba(0,0,0,0.04)] outline-none transition-all duration-200" name="svc_internet_detail" bind:value={$bookForm.svc_internet_detail} placeholder="e.g. Fibre 1.5G" aria-label="Internet details" maxlength="120" autocomplete="off" />
+              <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[var(--dim2)]"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg></span>
+            </div>
+          </div>
+        {:else}
+          <span class="ml-auto hidden sm:inline-flex items-center rounded-full bg-[var(--row2)] border border-[var(--line-thin)] px-2.5 py-1 text-[11px] font-medium tracking-wide uppercase text-[var(--dim2)]">Not included</span>
+        {/if}
+      </div>
+      <!-- Home phone -->
+      <div class="flex items-center gap-3 px-4 py-3 min-h-[56px] transition-colors duration-200 {svcHomePhone ? 'bg-[color-mix(in_srgb,var(--blue)_4%,var(--row))]' : 'bg-[var(--row)]'}">
+        <label class="flex items-center gap-3 cursor-pointer shrink-0 select-none">
+          <input type="checkbox" name="svc_home_phone" bind:checked={$bookForm.svc_home_phone} class="h-5 w-5 rounded-[6px] border-[1.5px] border-[var(--line)] bg-[var(--row2)] accent-[var(--blue)] checked:border-[var(--blue)] focus-visible:ring-2 focus-visible:ring-[var(--blue)] focus-visible:ring-offset-0 transition-colors" />
+          <span class="text-[15px] font-medium tracking-tight text-[var(--ink)]">Home phone</span>
+        </label>
+        {#if svcHomePhone}
+          <div class="flex flex-1 items-center gap-3 min-w-0 ml-2 sm:ml-4" in:fly={{ x: 10, duration: 260, easing: cubicOut }} out:fly={{ x: 8, duration: 140 }}>
+            <span class="hidden sm:block h-6 w-px bg-[var(--line)] shrink-0 opacity-60"></span>
+            <div class="relative flex-1">
+              <input use:autoFocus class="w-full bg-[var(--bg)] sm:bg-[var(--row2)] border border-[var(--line)] rounded-[10px] px-3.5 py-2.5 pr-8 text-[14px] leading-none text-[var(--ink)] placeholder:text-[var(--dim2)] placeholder:text-[13px] shadow-[inset_0_1px_2px_rgba(0,0,0,0.06)] focus:bg-[var(--row)] focus:border-[var(--blue)] focus:shadow-[0_0_0_4px_color-mix(in_srgb,var(--blue)_14%,transparent),inset_0_1px_2px_rgba(0,0,0,0.04)] outline-none transition-all duration-200" name="svc_home_phone_detail" bind:value={$bookForm.svc_home_phone_detail} placeholder="e.g. Unlimited Canada" aria-label="Home phone details" maxlength="120" autocomplete="off" />
+              <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[var(--dim2)]"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg></span>
+            </div>
+          </div>
+        {:else}
+          <span class="ml-auto hidden sm:inline-flex items-center rounded-full bg-[var(--row2)] border border-[var(--line-thin)] px-2.5 py-1 text-[11px] font-medium tracking-wide uppercase text-[var(--dim2)]">Not included</span>
+        {/if}
+      </div>
+      <!-- TV -->
+      <div class="flex items-center gap-3 px-4 py-3 min-h-[56px] transition-colors duration-200 {svcTv ? 'bg-[color-mix(in_srgb,var(--blue)_4%,var(--row))]' : 'bg-[var(--row)]'}">
+        <label class="flex items-center gap-3 cursor-pointer shrink-0 select-none">
+          <input type="checkbox" name="svc_tv" bind:checked={$bookForm.svc_tv} class="h-5 w-5 rounded-[6px] border-[1.5px] border-[var(--line)] bg-[var(--row2)] accent-[var(--blue)] checked:border-[var(--blue)] focus-visible:ring-2 focus-visible:ring-[var(--blue)] focus-visible:ring-offset-0 transition-colors" />
+          <span class="text-[15px] font-medium tracking-tight text-[var(--ink)]">TV</span>
+        </label>
+        {#if svcTv}
+          <div class="flex flex-1 items-center gap-3 min-w-0 ml-2 sm:ml-4" in:fly={{ x: 10, duration: 260, easing: cubicOut }} out:fly={{ x: 8, duration: 140 }}>
+            <span class="hidden sm:block h-6 w-px bg-[var(--line)] shrink-0 opacity-60"></span>
+            <div class="relative flex-1">
+              <input use:autoFocus class="w-full bg-[var(--bg)] sm:bg-[var(--row2)] border border-[var(--line)] rounded-[10px] px-3.5 py-2.5 pr-8 text-[14px] leading-none text-[var(--ink)] placeholder:text-[var(--dim2)] placeholder:text-[13px] shadow-[inset_0_1px_2px_rgba(0,0,0,0.06)] focus:bg-[var(--row)] focus:border-[var(--blue)] focus:shadow-[0_0_0_4px_color-mix(in_srgb,var(--blue)_14%,transparent),inset_0_1px_2px_rgba(0,0,0,0.04)] outline-none transition-all duration-200" name="svc_tv_detail" bind:value={$bookForm.svc_tv_detail} placeholder="e.g. Optik TV 4K" aria-label="TV details" maxlength="120" autocomplete="off" />
+              <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-[var(--dim2)]"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg></span>
+            </div>
+          </div>
+        {:else}
+          <span class="ml-auto hidden sm:inline-flex items-center rounded-full bg-[var(--row2)] border border-[var(--line-thin)] px-2.5 py-1 text-[11px] font-medium tracking-wide uppercase text-[var(--dim2)]">Not included</span>
+        {/if}
+      </div>
     </div>
+    {#if $errors.svc_internet_detail}<span class="block px-4 pt-2 text-[13px] leading-tight text-[var(--red)]">{$errors.svc_internet_detail}</span>{/if}
+    {#if $errors.svc_home_phone_detail}<span class="block px-4 pt-2 text-[13px] leading-tight text-[var(--red)]">{$errors.svc_home_phone_detail}</span>{/if}
+    {#if $errors.svc_tv_detail}<span class="block px-4 pt-2 text-[13px] leading-tight text-[var(--red)]">{$errors.svc_tv_detail}</span>{/if}
   </div>
 
   <!-- Emergency -->
-  <div class="group">
+  <div id="sec-emergency" class="group scroll-mt-24">
     <div class="group-title">Emergency contact</div>
     <div class="input-group">
-      <label class="field"><span class="key">Emergency contact name</span><input class={inpc} name="emergency_name" bind:value={$bookForm.emergency_name} placeholder="Emergency contact name" aria-label="Emergency contact name" /></label>
-      <label class="field"><span class="key">Phone number</span><input class={inpc} name="emergency_number" bind:value={$bookForm.emergency_number} type="tel" placeholder="Phone number" aria-label="Phone number" /></label>
-      <label class="field"><span class="key">Relation</span><input class={inpc} name="emergency_relation" bind:value={$bookForm.emergency_relation} placeholder="Relation" aria-label="Relation" /></label>
+      <label class="field"><input class={inpc} name="emergency_name" bind:value={$bookForm.emergency_name} placeholder="Emergency contact name" aria-label="Emergency contact name" /></label>
+      <label class="field"><input class={inpc} name="emergency_number" bind:value={$bookForm.emergency_number} type="tel" placeholder="Phone number" aria-label="Phone number" /></label>
+      <label class="field"><input class={inpc} name="emergency_relation" bind:value={$bookForm.emergency_relation} placeholder="Relation" aria-label="Relation" /></label>
     </div>
   </div>
 
-  <div class="group">
+  <div id="sec-verbal" class="group scroll-mt-24">
     <div class="group-title">Verbal password</div>
     <div class="input-group">
-      <label class="field"><span class="key">Verbal password</span><input class={inpc} name="verbal_password" bind:value={$bookForm.verbal_password} placeholder="Verbal password" aria-label="Verbal password" /></label>
+      <label class="field"><input class={inpc} name="verbal_password" bind:value={$bookForm.verbal_password} placeholder="Verbal password" aria-label="Verbal password" /></label>
     </div>
   </div>
 
-  <div class="group">
-    <div class="group-title">Existing themes / package details</div>
-    <div class="input-group">
-      <label class="field"><span class="key">Themes / package details</span><textarea class={inpc} name="themes" bind:value={$bookForm.themes} rows="3" placeholder="Themes / package details" aria-label="Themes"></textarea></label>
-    </div>
-  </div>
-
-  <div class="group">
+  <div id="sec-security" class="group scroll-mt-24">
     <div class="group-title">Home security being offered</div>
     <div class="input-group">
-      <label class="field"><span class="key">Home security being offered</span><textarea class={inpc} name="security_offered" bind:value={$bookForm.security_offered} rows="3" placeholder="Home security being offered" aria-label="Home security"></textarea></label>
+      <label class="field"><textarea class={inpc} name="security_offered" bind:value={$bookForm.security_offered} rows="3" placeholder="Home security being offered" aria-label="Home security"></textarea></label>
     </div>
   </div>
 
   <!-- Tech + Duration -->
-  <div class="group">
+  <div id="sec-schedule" class="group scroll-mt-24">
     <div class="group-title">Schedule</div>
     <div class="input-group">
       <label class="field">
-        <span class="key">Technician</span>
         <Select.Root type="single" value={String(techId)} onValueChange={(v) => { if (v != null) setTech(Number(v)); }} items={bookTechItems}>
-          <Select.Trigger class={inpc + ' flex cursor-pointer items-center justify-between text-left data-[placeholder]:!text-[var(--dim)]'} aria-label="Technician"><Select.Value placeholder="Technician" /><svg width="12" height="8" viewBox="0 0 12 8" fill="none" aria-hidden="true" class="ml-2 shrink-0 text-[var(--dim)]"><path d="M1 1.5L6 6.5L11 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></Select.Trigger>
+          <Select.Trigger class={inpc + ' flex cursor-pointer items-center justify-between text-left data-[placeholder]:!text-[var(--dim)]'} aria-label="Technician (required)" aria-required="true"><Select.Value placeholder="Technician *" /><svg width="12" height="8" viewBox="0 0 12 8" fill="none" aria-hidden="true" class="ml-2 shrink-0 text-[var(--dim)]"><path d="M1 1.5L6 6.5L11 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></Select.Trigger>
           <Select.Portal>
             <Select.Content class="z-[1000] min-w-[200px] w-[var(--bits-floating-anchor-width)] max-w-[92vw] rounded-[10px] border border-[var(--line)] bg-[var(--row)] p-1 text-[var(--ink)] shadow-xl" sideOffset={6}>
               <Select.Viewport>
@@ -380,8 +472,8 @@
   <input type="hidden" name="lng" value={selLng ?? ''} />
 
   <!-- Time slots — 2-tab: List / Calendar -->
-  <div class="group group--loose">
-    <div class="group-title flex items-center justify-between">Time <span class="inline-flex items-center rounded-full bg-[color-mix(in_srgb,var(--blue)_10%,transparent)] px-2.5 py-1 text-[12px] font-semibold text-[var(--blue)] border border-[color-mix(in_srgb,var(--blue)_15%,transparent)]">{slots.length} slots</span></div>
+  <div id="sec-time" class="group group--loose scroll-mt-24">
+    <div class="group-title flex items-center justify-between"><span>Time <span class="req" aria-hidden="true">*</span></span> <span class="inline-flex items-center rounded-full bg-[color-mix(in_srgb,var(--blue)_10%,transparent)] px-2.5 py-1 text-[12px] font-semibold text-[var(--blue)] border border-[color-mix(in_srgb,var(--blue)_15%,transparent)]">{slots.length} slots</span></div>
     <div class="px-4 pb-3">
       <div class="inline-flex rounded-[10px] bg-[var(--row2)] p-1 gap-1">
         <Button.Root type="button" class="px-4 py-1.5 rounded-[8px] text-[14px] font-medium transition-colors {timeView==='list' ? 'bg-[var(--row)] text-[var(--ink)] shadow-sm border border-[var(--line-thin)]' : 'text-[var(--dim)] hover:text-[var(--ink)]'}" onclick={() => timeView='list'}>List</Button.Root>
@@ -428,8 +520,8 @@
           {#each Array(calFirstWeekday) as _}<div class="bg-[var(--row)] min-h-[64px]"></div>{/each}
           {#each Array(calDaysInMonth) as _, i}
             {@const dayNum = i+1}
-            {@const iso = calDateToIso(dayNum)}
-            {@const daySlots = calSlotsMap.get(iso) || []}
+            {@const iso = calDateToIso(calYear, calMonth, dayNum)}
+            {@const daySlots = slotsForCalendarDay(iso)}
             {@const isTodayCal = iso===todayIso}
             {@const isSelectedDay = iso===calSelectedDay}
             {@const hasSlots = daySlots.length>0}
@@ -439,14 +531,14 @@
             </Button.Root>
           {/each}
         </div>
-        {#if calSelectedDay && calSlotsMap.get(calSelectedDay)?.length}
+        {#if calSelectedDay && slotsForCalendarDay(calSelectedDay).length}
           <div class="border-t border-[var(--line-thin)]">
             <div class="flex items-baseline gap-2 px-4 pt-3 pb-1">
               <span class="text-[15px] font-semibold {isToday(calSelectedDay) ? 'text-[var(--blue)]' : 'text-[var(--ink)]'}">{relativeDayLabel(calSelectedDay)}</span>
               <span class="text-[13px] text-[var(--dim)]">{fmtDay(calSelectedDay)}</span>
             </div>
             <div class="slot-grid">
-              {#each calSlotsMap.get(calSelectedDay) as s}<Button.Root type="button" class="slot-btn {s.starts_at === startSlotTs ? 'selected' : ''}" onclick={() => startSlotTs = s.starts_at}>{fmtTime(s.starts_at)}</Button.Root>{/each}
+              {#each slotsForCalendarDay(calSelectedDay) as s}<Button.Root type="button" class="slot-btn {s.starts_at === startSlotTs ? 'selected' : ''}" onclick={() => startSlotTs = s.starts_at}>{fmtTime(s.starts_at)}</Button.Root>{/each}
             </div>
           </div>
         {:else if calSelectedDay}
@@ -470,16 +562,15 @@
   <div class="group">
     <div class="group-title">Notes</div>
     <div class="input-group">
-      <label class="field"><span class="key">Notes</span><textarea class={inpc} name="notes" bind:value={$bookForm.notes} rows="2" placeholder="Notes" aria-label="Notes"></textarea></label>
+      <label class="field"><textarea class={inpc} name="notes" bind:value={$bookForm.notes} rows="2" placeholder="Notes" aria-label="Notes"></textarea></label>
     </div>
   </div>
 
-  <div class="group">
+  <div id="sec-pricing" class="group scroll-mt-24">
     <div class="group-title">Pricing</div>
     <div class="input-group">
       <label class="field">
-        <span class="key">Price ($)</span>
-        <input class={inpc} name="price" bind:value={$bookForm.price} type="number" min="0" step="0.01" inputmode="decimal" placeholder="Price ($)" aria-label="Price in dollars" aria-invalid={$errors.price ? "true" : undefined} />
+        <input class={inpc} name="price" bind:value={$bookForm.price} type="text" inputmode="decimal" placeholder="Price ($)" aria-label="Price in dollars" aria-invalid={$errors.price ? "true" : undefined} />
       {#if $errors.price}<span class="px-1 pt-1 text-[13px] leading-tight text-[var(--red)]" transition:fly={{ y: -4, duration: 160, easing: cubicOut }}>{$errors.price}</span>{/if}</label>
     </div>
   </div>
@@ -487,7 +578,7 @@
   <input type="hidden" name="starts_at" value={startsAtLocal} />
   <input type="hidden" name="ends_at" value={endsAtLocal} />
 
-  <div class="form-section">
+  <div id="sec-book" class="form-section scroll-mt-24">
     <div class="flex items-center gap-3">
       <Button.Root type="button" class="filled flex-1 !w-auto !min-h-[50px] transition-all duration-200 {confirmBook ? '!ring-2 !ring-white/60 !ring-offset-2 !ring-offset-[var(--bg)]' : ''}" disabled={confirmBook ? true : (!canSubmit || busy)} onclick={(e)=>{ if(!confirmBook && canSubmit && !busy){ e.preventDefault(); confirmBook=true; } }}>{#if busy}Booking…{:else if confirmBook}Are you sure?{:else}Book job{/if}</Button.Root>
       {#if confirmBook}

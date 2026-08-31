@@ -28,8 +28,8 @@
 
   const statusColor: Record<string, string> = {
     sent: '#0A84FF',
-    signed: '#30D158',
-    cancelled: '#FF453A'
+    signed: '#22C55E',
+    cancelled: '#EF4444'
   };
 
   $: visible = data.jobs.filter(
@@ -163,9 +163,9 @@
   </div>
 
 <div class="mx-4 mb-4 flex items-center gap-4 text-[13px] text-[var(--dim)]">
-    <span class="flex items-center gap-1.5"><span class="inline-block h-2.5 w-2.5 rounded-full" style="background:#0A84FF"></span>Sent</span>
-    <span class="flex items-center gap-1.5"><span class="inline-block h-2.5 w-2.5 rounded-full" style="background:#30D158"></span>Signed</span>
-    <span class="flex items-center gap-1.5"><span class="inline-block h-2.5 w-2.5 rounded-full" style="background:#FF453A"></span>Cancelled</span>
+    <span class="flex items-center gap-1.5"><span class="inline-block h-2.5 w-2.5 rounded-full" style="background:var(--blue)"></span>Sent</span>
+    <span class="flex items-center gap-1.5"><span class="inline-block h-2.5 w-2.5 rounded-full" style="background:var(--green)"></span>Signed</span>
+    <span class="flex items-center gap-1.5"><span class="inline-block h-2.5 w-2.5 rounded-full" style="background:var(--red)"></span>Cancelled</span>
 </div>
 
 <div class="relative z-0 isolate mx-4 mb-8 overflow-hidden rounded-[14px] border border-[var(--line)]" style="height: calc(100vh - 320px); min-height: 380px;">
@@ -175,6 +175,6 @@
 {#if visible.length === 0}
   <div class="empty mx-4 !mb-12">
     {data.jobs.length === 0 ? 'No jobs have a location yet.' : 'No jobs match this filter.'}
-    <div class="hint">Open a job and tap “Set location” to drop a pin.</div>
+    <div class="hint">Only jobs with a map location are shown here.</div>
   </div>
 {/if}

@@ -18,8 +18,9 @@
 
 <svelte:head><title>Clients</title></svelte:head>
 
-<div class="mt-8 mb-8 px-4">
+<div class="mt-8 mb-8 px-4 flex items-center justify-between gap-3">
   <h1 class="text-[28px] font-bold tracking-tight">Clients</h1>
+  {#if data.isAdmin}<a href="/export" class="export-link rounded-md border border-[var(--line)] bg-[var(--row)] px-3 py-2 text-sm font-medium">Export CSV</a>{/if}
 </div>
 
 <div class="px-4 pb-3">

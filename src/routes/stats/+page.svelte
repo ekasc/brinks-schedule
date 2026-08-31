@@ -59,6 +59,5 @@
 </div>
 
 <div class="form-section">
-  <a href="/income?p={data.period}" class="muted small">Income →</a>
-  <a href="/calendar" class="muted small ml-4">Week →</a>
+  <a href="/calendar" class="muted small">Week →</a>
 </div>

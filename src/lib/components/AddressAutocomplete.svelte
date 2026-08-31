@@ -10,6 +10,7 @@
   export let ariaLabel = 'Address';
   export let error: string | undefined = undefined;
   export let showKey = false;
+  export let required = false;
 
   let open = false;
   let loading = false;
@@ -78,7 +79,7 @@
 </script>
 
 <label class="field">
-  {#if showKey}<span class="key">Address</span>{/if}
+  {#if showKey}<span class="key">Address <span class="req" aria-hidden="true">*</span></span>{/if}
   <Popover.Root open={open} onOpenChange={handleOpenChange}>
     <Popover.Trigger>
       {#snippet child({ props })}
@@ -98,6 +99,8 @@
           role="combobox"
           {placeholder}
           aria-label={ariaLabel}
+          required={required}
+          aria-required={required ? 'true' : undefined}
           aria-invalid={error ? 'true' : undefined}
           autocomplete="off"
           style:border-color={error ? 'var(--red)' : undefined}

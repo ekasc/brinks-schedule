@@ -1,22 +1,23 @@
-import { error, fail, redirect } from '@sveltejs/kit';
+import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
-import { getJob, findUserById, setJobStatus, setJobCoords, setJobCompleted } from '$lib/server/db';
+import { getJob, findUserById, setJobStatus, setJobCompleted } from '$lib/server/db';
+import { isTechForbidden, assertJobLoadAccess } from '$lib/server/jobAccess';
+import { reconcileAndDeliver } from '$lib/server/notifications';
 
 const ALL_STATUSES = ['sent','signed','cancelled'] as const;
 
 export const load: PageServerLoad = async ({ params, locals }) => {
   if (!locals.user) throw redirect(302, '/login');
+  if (locals.user.role === 'admin') throw redirect(302, '/clients');
   const id = Number(params.id);
   const job = await getJob(id);
-  if (!job) throw error(404, 'Job not found');
+  assertJobLoadAccess(locals.user, job);
   const tech = await findUserById(job.tech_id);
   const booker = await findUserById(job.booked_by);
-  // PII visibility: tech assigned to the job, the booker, and any admin see PII.
-  // Other sales do not.
   const canSeePii = locals.user.role === 'admin'
     || (locals.user.role === 'tech' && locals.user.id === job.tech_id)
     || (locals.user.role === 'sales' && locals.user.id === job.booked_by);
-  const canEdit = canSeePii; // same gate for now
+  const canEdit = canSeePii;
   return {
     job,
     tech: tech ? { id: tech.id, display_name: tech.display_name, username: tech.username } : null,
@@ -29,9 +30,11 @@ export const load: PageServerLoad = async ({ params, locals }) => {
 export const actions: Actions = {
   status: async ({ request, params, locals }) => {
     if (!locals.user) return fail(403, { error: 'forbidden' });
+    if (locals.user.role === 'admin') return fail(403, { error: 'forbidden' });
     const id = Number(params.id);
     const job = await getJob(id);
     if (!job) return fail(404, { error: 'not found' });
+    if (isTechForbidden(locals.user, job)) return fail(403, { error: 'forbidden' });
     const canChange = locals.user.role === 'admin'
       || (locals.user.role === 'tech' && locals.user.id === job.tech_id)
       || (locals.user.role === 'sales' && locals.user.id === job.booked_by);
@@ -39,23 +42,9 @@ export const actions: Actions = {
     const data = await request.formData();
     const status = String(data.get('status') || '');
     if (!ALL_STATUSES.includes(status as any)) return fail(400, { error: 'bad status' });
-    await setJobStatus(id, status as any);
-    return { ok: true };
-  },
-  coords: async ({ request, params, locals }) => {
-    if (!locals.user) return fail(403, { error: 'forbidden' });
-    const id = Number(params.id);
-    const job = await getJob(id);
-    if (!job) return fail(404, { error: 'not found' });
-    const canEdit = locals.user.role === 'admin'
-      || (locals.user.role === 'tech' && locals.user.id === job.tech_id)
-      || (locals.user.role === 'sales' && locals.user.id === job.booked_by);
-    if (!canEdit) return fail(403, { error: 'forbidden' });
-    const data = await request.formData();
-    const lat = Number(data.get('lat'));
-    const lng = Number(data.get('lng'));
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return fail(400, { error: 'bad coords' });
-    await setJobCoords(id, lat, lng);
+    const res = await setJobStatus(id, status as any, locals.user.id);
+    if (res && 'conflict' in res) return fail(409, { error: res.conflict });
+    await reconcileAndDeliver().catch(()=>{});
     return { ok: true };
   },
   complete: async ({ request, params, locals }) => {
@@ -63,10 +52,11 @@ export const actions: Actions = {
     const id = Number(params.id);
     const job = await getJob(id);
     if (!job) return fail(404, { error: 'not found' });
-    // anyone signed in can mark completion (tech, sales, or admin)
+    if (isTechForbidden(locals.user, job)) return fail(403, { error: 'forbidden' });
     const data = await request.formData();
     const completed = String(data.get('completed') || '0') === '1';
-    await setJobCompleted(id, completed ? Math.floor(Date.now() / 1000) : null);
+    await setJobCompleted(id, completed ? Math.floor(Date.now() / 1000) : null, locals.user.id);
+    await reconcileAndDeliver().catch(()=>{});
     return { ok: true };
   }
 };

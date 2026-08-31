@@ -84,3 +84,27 @@ self.addEventListener('fetch', (e) => {
       .catch(() => caches.match(req).then((c) => c || Response.error()))
   );
 });
+
+self.addEventListener('push', (event) => {
+  let data = {};
+  try { data = event.data?.json() || {}; } catch { data = { body: event.data?.text() || '' }; }
+  event.waitUntil(self.registration.showNotification(data.title || 'Brinks Schedule', {
+    body: data.body || '',
+    tag: data.tag,
+    data: { url: data.url || '/' }
+  }));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  let target = new URL(event.notification.data?.url || '/', self.location.origin);
+  if (target.origin !== self.location.origin) target = new URL('/', self.location.origin);
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of windows) {
+      if ('navigate' in client) await client.navigate(target.href);
+      if ('focus' in client) return client.focus();
+    }
+    return self.clients.openWindow(target.href);
+  })());
+});

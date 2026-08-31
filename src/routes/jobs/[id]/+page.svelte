@@ -1,20 +1,12 @@
 <script lang="ts">
   import type { PageData } from './$types';
   import { invalidateAll } from '$app/navigation';
-  import { Dialog, Button } from 'bits-ui';
+  import { Button } from 'bits-ui';
   import { fly, scale } from 'svelte/transition';
   import { cubicOut } from 'svelte/easing';
   export let data: PageData;
 
-  let showMap = false;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let leafletMap: any = null;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let pinMarker: any = null;
-  let mapEl: HTMLDivElement | undefined;
   let busy = false;
-  let pendingLat: number | null = null;
-  let pendingLng: number | null = null;
   let confirmStatus: string | null = null;
   let confirmCompleted = false;
   $: if (busy) { confirmStatus = null; confirmCompleted = false; }
@@ -51,56 +43,15 @@
     else confirmStatus = s;
   }
 
-  async function openMap() {
-    showMap = true;
-    await new Promise(r => setTimeout(r, 50));
-    const L = (await import('leaflet')).default;
-    if (!document.getElementById('leaflet-css')) {
-      const link = document.createElement('link');
-      link.id = 'leaflet-css';
-      link.rel = 'stylesheet';
-      link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-      document.head.appendChild(link);
-    }
-    const start: [number, number] = (j.lat != null && j.lng != null) ? [j.lat, j.lng] : [49.2827, -123.1207];
-    leafletMap = L.map(mapEl, { zoomControl: true }).setView(start, j.lat != null ? 14 : 11);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(leafletMap);
-    if (j.lat != null && j.lng != null) {
-      pinMarker = L.marker([j.lat, j.lng]).addTo(leafletMap);
-      pendingLat = j.lat; pendingLng = j.lng;
-    }
-    leafletMap.on('click', (e: { latlng: { lat: number; lng: number } }) => {
-      if (pinMarker) pinMarker.remove();
-      pinMarker = L.marker([e.latlng.lat, e.latlng.lng]).addTo(leafletMap);
-      pendingLat = e.latlng.lat;
-      pendingLng = e.latlng.lng;
-    });
-  }
-
-  function closeMap() {
-    if (leafletMap) { leafletMap.remove(); leafletMap = null; }
-    pinMarker = null;
-    showMap = false;
-  }
-
-  async function saveCoords() {
-    if (pendingLat == null || pendingLng == null) return;
-    busy = true;
-    try {
-      const fd = new FormData();
-      fd.set('lat', String(pendingLat));
-      fd.set('lng', String(pendingLng));
-      await fetch('?/coords', { method: 'POST', body: fd });
-      await invalidateAll();
-      closeMap();
-    } finally {
-      busy = false;
-    }
-  }
+  // Map pin-drop UI removed — location is set at booking time (auto-geocoded) and shown read-only.
 
   $: j = data.job;
   $: idLabel = j.id_type === 'dl' ? "Driver's licence" : j.id_type === 'passport' ? 'Passport' : j.id_type === 'bcid' ? 'BCID' : j.id_type === 'other' ? 'Other' : '—';
-  $: services = [j.svc_internet ? 'Internet' : null, j.svc_home_phone ? 'Home phone' : null, j.svc_tv ? 'TV' : null].filter(Boolean) as string[];
+  $: services = [
+    j.svc_internet ? { label: 'Internet', detail: j.svc_internet_detail } : null,
+    j.svc_home_phone ? { label: 'Home phone', detail: j.svc_home_phone_detail } : null,
+    j.svc_tv ? { label: 'TV', detail: j.svc_tv_detail } : null
+  ].filter(Boolean) as { label: string; detail: string | null }[];
   $: nextStatus = j.status === 'sent' ? 'signed' : null;
   $: prevStatus = j.status === 'signed' ? 'sent' : j.status === 'cancelled' ? 'sent' : null;
   $: canComplete = j.status === 'signed' && !j.completed_at;
@@ -138,20 +89,26 @@
   function bookingSummary(): string {
     const lines: string[] = [];
     const L = (k: string, v: unknown) => lines.push(`${k}: ${v == null || v === '' ? '—' : v}`);
-    L('Telus Pin', j.telus_pin);
+    const blank = () => lines.push('');
     L('Full name', j.client_name);
     L('Address', j.address);
     L('Phone number', j.phone);
     L('Email', j.email);
     L('Date of Birth', j.dob);
     L('DL last 4', j.id_last4 ? `${j.id_type ? j.id_type + ' ' : ''}••${j.id_last4}` : '');
+    blank();
+    L('Telus Pin', j.telus_pin);
+    L('Services', services.length ? services.map(s => s.detail ? `${s.label} (${s.detail})` : s.label).join(', ') : '—');
+    L('Price', j.price_cents ? '$' + (j.price_cents / 100).toFixed(2) : '—');
+    blank();
+    L('Install date and time', `${fmtFull(j.starts_at)} – ${fmtFull(j.ends_at)}`);
+    L('Any extra equipment', j.themes);
+    blank();
     L('Emergency contact name', j.emergency_name);
     L('Contact ph number', j.emergency_number);
     L('Contact relation', j.emergency_relation);
     L('Verbal password', j.verbal_password);
-    L('Price', j.price_cents ? '$' + (j.price_cents / 100).toFixed(2) : '—');
-    L('Install date and time', `${fmtFull(j.starts_at)} – ${fmtFull(j.ends_at)}`);
-    L('Any extra equipment', j.themes);
+    blank();
     L('Notes', j.notes);
     return lines.join('\n');
   }
@@ -306,7 +263,7 @@
   {:else}
     <div class="group-rows">
       <div class="flex flex-wrap gap-2 p-4">
-        {#each services as s}<span class="pill signed !py-1">{s}</span>{/each}
+        {#each services as s}<span class="pill signed !py-1">{s.label}{s.detail ? ` — ${s.detail}` : ''}</span>{/each}
       </div>
       {#if j.themes}
         <div class="border-t border-[var(--line-thin)] px-4 py-3">
@@ -336,11 +293,16 @@
   </div>
 {/if}
 
+{#if data.job.lat == null || data.job.lng == null}
+  <div class="mx-4 mb-4 rounded-[10px] border border-[var(--line)] bg-[var(--row2)] px-4 py-3 text-[13px] leading-snug text-[var(--ink)]">
+    <span class="font-medium">No map location.</span> This job won’t appear on the route map. Enter a full street address (e.g. “123 Main St, Vancouver, BC”) when booking so it can be plotted.
+  </div>
+  {/if}
 <!-- Actions: generous separation before, tight internal grouping -->
 {#if data.canEdit}
   <div class="mt-8 flex flex-col gap-3 px-4">
     <div class="flex flex-wrap gap-2">
-      <Button.Root class="rounded-full border border-[var(--line)] bg-[var(--row)] px-4 py-2 text-[15px] font-medium text-[var(--blue)] hover:bg-[var(--row2)]" onclick={openMap}>{j.lat != null ? 'Move pin' : 'Set location'}</Button.Root>
+      <!-- set-location pin-drop button removed -->
       {#if j.status === 'cancelled'}
         <Button.Root class="rounded-full bg-[var(--row)] px-4 py-2 text-[15px] font-medium text-[var(--blue)] border border-[var(--line)]" onclick={reopen} disabled={busy}>Restore</Button.Root>
       {/if}
@@ -405,28 +367,7 @@
   </div>
 {/if}
 
-<Dialog.Root bind:open={showMap}>
-  <Dialog.Portal>
-    <Dialog.Overlay class="fixed inset-0 z-[1000] bg-black/50" />
-    <Dialog.Content class="fixed inset-0 z-[1001] flex flex-col bg-[var(--bg)]">
-      <div class="flex items-center justify-between border-b border-[var(--line)] px-4 py-3">
-        <h2 class="text-[17px] font-semibold">Drop a pin</h2>
-        <Button.Root class="text-[var(--blue)] hover:opacity-70" onclick={closeMap} aria-label="Close">Cancel</Button.Root>
-      </div>
-      <div bind:this={mapEl} class="h-full w-full"></div>
-      <div class="flex items-center justify-between border-t border-[var(--line)] px-4 py-3 gap-3">
-        {#if pendingLat != null}
-          <span class="text-sm text-[var(--dim)] font-mono">Pin: {pendingLat.toFixed(4)}, {pendingLng?.toFixed(4)}</span>
-        {:else}
-          <span class="text-sm text-[var(--dim)]">Tap the map to drop a pin.</span>
-        {/if}
-        <Button.Root class="rounded-[10px] bg-[var(--blue)] px-5 py-2.5 text-[15px] font-semibold text-white hover:bg-[var(--blue-press)] disabled:opacity-30 shrink-0" onclick={saveCoords} disabled={pendingLat == null || busy}>
-          {busy ? 'Saving…' : 'Save location'}
-        </Button.Root>
-      </div>
-    </Dialog.Content>
-  </Dialog.Portal>
-</Dialog.Root>
+  <!-- map pin-drop UI removed -->
 
 <div class="mt-10 flex justify-between px-4 text-sm">
   <a class="text-[var(--dim)] hover:text-[var(--ink)] transition-colors" href="/calendar">← Week</a>

@@ -16,6 +16,7 @@ export interface SessionPayload {
   uid: number;
   role: 'admin' | 'sales' | 'tech';
   username: string;
+  sv: number;
 }
 
 export function sign(payload: SessionPayload): string {
@@ -44,9 +45,10 @@ export function readCookie(cookieHeader: string | null): string | null {
 
 export async function authenticate(username: string, password: string): Promise<User | null> {
   const u = await findUserByUsername(username.toLowerCase().trim());
-  if (!u) return null;
+  if (!u || u.is_active !== 1) return null;
   if (!verifyPassword(u, password)) return null;
-  return (await findUserById(u.id)) ?? null;
+  const user=await findUserById(u.id);
+  return user?.is_active===1 ? user : null;
 }
 
 export async function userFromCookie(cookieHeader: string | null): Promise<User | null> {
@@ -54,7 +56,9 @@ export async function userFromCookie(cookieHeader: string | null): Promise<User 
   if (!token) return null;
   const payload = verify(token);
   if (!payload) return null;
-  return (await findUserById(payload.uid)) ?? null;
+  const user=await findUserById(payload.uid);
+  if(!user || user.is_active!==1 || user.session_version!==payload.sv) return null;
+  return user;
 }
 
 // --- password helpers (re-exported for the admin "set password" page) ---

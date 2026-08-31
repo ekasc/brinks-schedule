@@ -8,6 +8,7 @@
   import { haversineKm, travelMinutes, fmtDist, fmtMin } from '$lib/geo';
   import { Select, Calendar, Popover, Button, Dialog } from 'bits-ui';
   import { CalendarDate, parseDate, today, getLocalTimeZone } from '@internationalized/date';
+  import { swipeSheet } from '$lib/actions/swipeSheet';
   export let data: PageData;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -78,8 +79,8 @@
 
   const statusColor: Record<string, string> = {
     sent: '#0A84FF',
-    signed: '#30D158',
-    cancelled: '#FF453A'
+    signed: '#22C55E',
+    cancelled: '#EF4444'
   };
 
   function changeDate(e: Event) {
@@ -260,14 +261,14 @@
 </div>
 
 <!-- Filters: mobile opens a bottom sheet; desktop expands inline -->
-<div class="sticky top-[44px] z-40 -mx-4 mb-4 border-y border-[var(--line-thin)] bg-[var(--bg)]/90 backdrop-blur-xl supports-[backdrop-filter]:bg-[var(--bg)]/80">
-  <button type="button" class="flex w-full cursor-pointer items-center justify-between gap-2 px-4 py-3 text-left transition-opacity active:!opacity-90" onclick={() => { if (typeof window !== 'undefined' && window.matchMedia('(min-width: 541px)').matches) filterOpen = !filterOpen; else sheetOpen = true; }} aria-expanded={filterOpen || sheetOpen} aria-label="Toggle filters">
+<div class="mb-4 border-y border-[var(--line-thin)] bg-[var(--row)]">
+  <button type="button" class="flex w-full min-w-0 cursor-pointer items-center justify-between gap-2 overflow-hidden px-4 py-3 text-left transition-opacity active:!opacity-90" onclick={() => { if (typeof window !== 'undefined' && window.matchMedia('(min-width: 541px)').matches) filterOpen = !filterOpen; else sheetOpen = true; }} aria-expanded={filterOpen || sheetOpen} aria-label="Toggle filters">
     <span class="flex min-w-0 items-center gap-2 text-[14px] font-medium text-[var(--ink)]">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" class="shrink-0 text-[var(--dim)]"><path d="M3 6h18M7 12h10M10 18h4"/></svg>
       <span class="truncate">{techName} · {dateLabel}</span>
     </span>
     <span class="flex shrink-0 items-center gap-2">
-      <span class="rounded-full bg-[var(--row2)] px-2 py-0.5 text-[11px] font-medium text-[var(--dim)]">{located.length} stops</span>
+      <span class="whitespace-nowrap rounded-full bg-[var(--row2)] px-2 py-0.5 text-[11px] font-medium text-[var(--dim)]">{located.length} stops</span>
       <svg width="16" height="16" viewBox="0 0 12 8" fill="none" aria-hidden="true" class="text-[var(--dim)] transition-transform" style="transform: rotate({filterOpen ? 180 : 0}deg)"><path d="M1 1.5L6 6.5L11 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </span>
   </button>
@@ -288,7 +289,8 @@
   <Dialog.Portal>
     <Dialog.Overlay class="route-sheet-overlay fixed inset-0 z-[1000] bg-black/40 backdrop-blur-sm" />
     <Dialog.Content class="route-sheet-content fixed inset-x-0 bottom-0 z-[1001] max-h-[85vh] overflow-hidden rounded-t-[20px] border-t border-[var(--line)] bg-[var(--bg)] shadow-2xl">
-      <div class="mx-auto mt-3 h-1.5 w-10 rounded-full bg-[var(--line)]" aria-hidden="true"></div>
+      <div use:swipeSheet={{ onClose: () => sheetOpen = false }} class="flex flex-col">
+      <div data-sheet-handle class="mx-auto flex justify-center py-3 -my-1" aria-hidden="true" style="touch-action:none;"><div class="h-1.5 w-10 rounded-full bg-[var(--line)]"></div></div>
       <div class="flex items-center justify-between px-4 pb-2 pt-4">
         <h2 class="text-[17px] font-semibold">Filters</h2>
         <Button.Root class="rounded-full bg-[var(--row)] px-3 py-1.5 text-[14px] font-medium text-[var(--ink)] border border-[var(--line)]" onclick={() => (sheetOpen = false)}>Done</Button.Root>
@@ -299,6 +301,7 @@
           <Button.Root class="flex-1 rounded-full bg-[var(--blue)] px-4 py-3 text-[15px] font-semibold text-white hover:bg-[var(--blue-press)]" onclick={() => { goto(`/route?tech=${selTech}&date=${selDate}`); sheetOpen = false; }}>Show route</Button.Root>
           <Button.Root class="rounded-full border border-[var(--line)] bg-[var(--row)] px-4 py-3 text-[15px] font-medium text-[var(--ink)] hover:bg-[var(--row2)]" onclick={() => (sheetOpen = false)}>Close</Button.Root>
         </div>
+      </div>
       </div>
     </Dialog.Content>
   </Dialog.Portal>

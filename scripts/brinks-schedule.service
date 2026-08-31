@@ -1,0 +1,19 @@
+[Unit]
+Description=Schedule (SvelteKit)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ekasc
+WorkingDirectory=/home/ekasc/brinks-schedule
+EnvironmentFile=/home/ekasc/brinks-schedule/.env
+ExecStart=/usr/bin/env node build/index.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/home/ekasc/brinks-schedule/data /home/ekasc/brinks-schedule/uploads
+
+[Install]
+WantedBy=multi-user.target

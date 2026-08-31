@@ -157,6 +157,13 @@ select {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1l5 5 5-5' fill='none' stroke='%238E8E93' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   background-repeat: no-repeat; background-position: right 2px center;
 }
+/* Prevent iOS Safari auto-zoom on focus — all text fields must be >=16px */
+@media (max-width: 767px) {
+  input, textarea, select,
+  input[type="text"], input[type="search"], input[type="email"], input[type="tel"], input[type="password"], input[type="number"], input[type="date"], input[type="time"] {
+    font-size: 16px !important;
+  }
+}
 
 /* ─── Grouped table (iOS list) ─── */
 .group { margin: 0 var(--s-4) var(--s-8); }
@@ -193,6 +200,7 @@ select {
 .row-line input { text-align: right; padding: 0; min-height: 0; }
 .row-line > .chev { color: var(--dim); font-size: var(--t-17); }
 
+.req { color: var(--red); font-weight: 600; margin-left: 2px; }
 .field { padding: var(--s-3) var(--s-4) var(--s-2); }
 .field > .key {
   color: var(--dim2); font-size: var(--t-13);
@@ -525,12 +533,10 @@ button:active:not(:disabled), .btn:active:not(:disabled) { transition: opacity 1
 }
 
 .bar-wrap { will-change: backdrop-filter; }
-/* material hierarchy — larger surfaces read thicker */
+/* material hierarchy — larger surfaces read thicker; top highlight is light-only */
 .input-group, .group-rows { position: relative; }
-.input-group::before, .group-rows::before { content: ''; position: absolute; inset: 0; border-radius: inherit; border-top: 1px solid rgba(255,255,255,0.06); pointer-events: none; }
-@media (prefers-color-scheme: light) {
-  .input-group::before, .group-rows::before { border-top-color: rgba(255,255,255,0.9); }
-}
+:root[data-theme="light"] .input-group::before,
+:root[data-theme="light"] .group-rows::before { content: ''; position: absolute; inset: 0; border-radius: inherit; border-top: 1px solid rgba(255,255,255,0.9); pointer-events: none; }
 /* typography — size-specific tracking/leading */
 .large-title > h1, h1 { letter-spacing: -0.02em; line-height: 1.05; font-optical-sizing: auto; }
 .field > .key { letter-spacing: 0.01em; }

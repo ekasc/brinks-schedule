@@ -20,6 +20,11 @@ ORIGIN = "https://schedule.ekasc.workers.dev"
 # secrets: run
 # npx wrangler secret put JWT_SECRET
 # npx wrangler secret put PII_KEY  (optional, falls back to JWT_SECRET)
+# npx wrangler secret put VAPID_PUBLIC_KEY
+# npx wrangler secret put VAPID_PRIVATE_KEY
+# npx wrangler secret put VAPID_SUBJECT  (for example mailto:ops@example.com)
+# npx wrangler secret put CRON_SECRET
+# GitHub Actions also needs SCHEDULE_ORIGIN and NOTIFICATION_CRON_SECRET.
 
 [placement]
 mode = "smart"

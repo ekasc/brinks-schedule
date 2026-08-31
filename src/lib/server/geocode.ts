@@ -91,7 +91,9 @@ export async function geocode(address: string): Promise<Coords | null> {
       result = null;
     }
   }
-  cache.set(key, result);
+  // Only cache successful lookups. Caching a miss would let a transient geocoder
+  // outage permanently deny a valid address (and defeat the book-action retry).
+  if (result) cache.set(key, result);
   return result;
 }
 

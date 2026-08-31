@@ -1,0 +1,24 @@
+name: Notification delivery
+
+on:
+  schedule:
+    # The endpoint creates the summary at the first run at or after 7 AM
+    # America/Vancouver and deduplicates it by user and local date.
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  deliver:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate summaries and deliver push notifications
+        env:
+          SCHEDULE_ORIGIN: ${{ secrets.SCHEDULE_ORIGIN }}
+          CRON_SECRET: ${{ secrets.NOTIFICATION_CRON_SECRET }}
+        run: |
+          test -n "$SCHEDULE_ORIGIN"
+          test -n "$CRON_SECRET"
+          curl --fail-with-body --retry 4 --retry-all-errors \
+            --connect-timeout 10 --max-time 60 \
+            -X POST -H "Authorization: Bearer $CRON_SECRET" \
+            "$SCHEDULE_ORIGIN/api/notifications/cron"
