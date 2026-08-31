@@ -86,13 +86,8 @@ function ensureSchemaOnce(): Promise<void> {
 }
 
 function getD1(): D1 | null {
-  // If DB_PATH is explicitly set to a local file (E2E preview), force better-sqlite3.
-  // This prevents `vite preview` from accidentally using an empty D1 binding when
-  // the test harness has seeded a file DB at /tmp/brinks-test-e2e.db.
   const explicitDbPath = (privateEnv as any).DB_PATH ?? (process.env as any).DB_PATH;
-  if (explicitDbPath && (explicitDbPath.startsWith('/tmp/') || explicitDbPath.startsWith('./data/') || explicitDbPath.includes('test-e2e'))) return null;
-  // `vite dev` always uses local better-sqlite3 (the adapter injects a D1
-  // binding in dev too, but it's empty — we want the real local DB there).
+  if (explicitDbPath) return null;
   if (dev) return null;
   try {
     const ev = getRequestEvent();

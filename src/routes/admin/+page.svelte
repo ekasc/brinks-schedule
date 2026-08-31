@@ -52,15 +52,15 @@
             <div class="input-group">
               <label class="field">
                 <span class="key">Display name</span>
-                <input class={inpc} name="display_name" required placeholder="Jane Doe" aria-label="Display name" autocomplete="off" />
+                <input class={inpc} id="new-display" name="display_name" required placeholder="Jane Doe" aria-label="Display name" autocomplete="off" />
               </label>
               <label class="field">
                 <span class="key">Username</span>
-                <input class={inpc} name="username" required autocomplete="off" placeholder="jane.doe" aria-label="Username" autocapitalize="off" />
+                <input class={inpc} id="new-username" name="username" required autocomplete="off" placeholder="jane.doe" aria-label="Username" autocapitalize="off" />
               </label>
               <label class="field">
                 <span class="key">Password</span>
-                <input class={inpc} name="password" type="password" required minlength="8" maxlength="128" placeholder="At least 8 characters" aria-label="Password" />
+                <input class={inpc} id="new-password" name="password" type="password" required minlength="8" maxlength="128" placeholder="At least 8 characters" aria-label="Password" />
               </label>
             </div>
             <div class="input-group">

@@ -35,8 +35,8 @@ test.describe('auth', () => {
 
   test('admin can login', async ({ page }) => {
     await login(page, 'admin');
-    await expect(page).toHaveURL('/');
-    await expect(page.getByRole('heading', { name: 'Today' })).toBeVisible();
+    await expect(page).toHaveURL(/\/clients/);
+    await expect(page.getByRole('heading', { name: 'Admin' })).toBeVisible();
   });
 
   test('tech can login', async ({ page }) => {
@@ -48,7 +48,7 @@ test.describe('auth', () => {
   test('logged-in user visiting /login is redirected to /', async ({ page }) => {
     await login(page, 'admin');
     await page.goto('/login');
-    await expect(page).toHaveURL('/');
+    await expect(page).toHaveURL(/\/clients/);
   });
 
   test('logout clears session and protects /', async ({ page, context }) => {
