@@ -45,8 +45,8 @@
 
   // Map pin-drop UI removed — location is set at booking time (auto-geocoded) and shown read-only.
 
-  $: j = data.job;
-  $: idLabel = j.id_type === 'dl' ? "Driver's licence" : j.id_type === 'passport' ? 'Passport' : j.id_type === 'bcid' ? 'BCID' : j.id_type === 'other' ? 'Other' : '—';
+  $: j = data.job as any;
+  $: idLabel = (j as any).id_type === 'dl' ? "Driver's licence" : (j as any).id_type === 'passport' ? 'Passport' : (j as any).id_type === 'bcid' ? 'BCID' : (j as any).id_type === 'other' ? 'Other' : '—';
   $: services = [
     j.svc_internet ? { label: 'Internet', detail: j.svc_internet_detail } : null,
     j.svc_home_phone ? { label: 'Home phone', detail: j.svc_home_phone_detail } : null,
@@ -212,6 +212,11 @@
 {#if data.canSeePii}
   <div class="group">
     <div class="group-title">Customer — private</div>
+    {#if j._decryptFailed?.length}
+      <div class="mx-4 mt-3 rounded-[10px] border border-amber-300 bg-amber-50 px-3 py-2 text-[13px] leading-snug text-amber-900" role="alert">
+        ⚠ Decryption failed for: {j._decryptFailed.join(', ')} — re-enter. Ciphertext is never shown.
+      </div>
+    {/if}
     <div class="group-rows">
       {#if j.dob}
         <div class="row-line">

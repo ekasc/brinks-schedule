@@ -3,7 +3,7 @@ import { superValidate } from 'sveltekit-superforms/server';
 import { zod4 } from 'sveltekit-superforms/adapters';
 import type { Actions, PageServerLoad } from './$types';
 import { bookJobSchema } from '$lib/schemas/book';
-import { listActiveUsers, createJob, getAvailableSlots, SLOT_HORIZON_DAYS } from '$lib/server/db';
+import { listActiveUsers, createJob, getAvailableSlots, getAvailableSlotsForDurationsForTechs, SLOT_HORIZON_DAYS } from '$lib/server/db';
 import { geocode } from '$lib/server/geocode';
 import { normalizeDuration, normalizeTechSelection } from '$lib/server/bookingSelection';
 import { notifyJobCreated } from '$lib/server/notifications';
@@ -17,12 +17,16 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   const allDurations = [60, 90, 120] as const;
   const slotsByTech: Record<number, { starts_at: number; ends_at: number }[]> = {};
   const slotsByTechByDuration: Record<number, Record<number, { starts_at: number; ends_at: number }[]>> = {};
-  for (const t of techs) {
-    slotsByTech[t.id] = await getAvailableSlots(t.id, { durationMin });
-    slotsByTechByDuration[t.id] = {};
-    for (const d of allDurations) slotsByTechByDuration[t.id][d] = await getAvailableSlots(t.id, { durationMin: d });
+  if (techs.length) {
+    // True N+1 elimination: 4 queries total for all techs, not 4*N.
+    const byTech = await getAvailableSlotsForDurationsForTechs(techs.map(t=> t.id), {}, allDurations as unknown as number[]);
+    for (const t of techs) {
+      slotsByTechByDuration[t.id] = (byTech[t.id] ?? {}) as Record<number, { starts_at: number; ends_at: number }[]>;
+      slotsByTech[t.id] = byTech[t.id]?.[durationMin] ?? [];
+    }
   }
   return {
+    // zod 4.5.2 vs sveltekit-superforms: _zod version mismatch, cast required
     form: await superValidate(zod4(bookJobSchema as any)),
     techs: techs.map(t => ({ id: t.id, display_name: t.display_name })), slotsByTech, slotsByTechByDuration,
     preselectTech, preselectDate: url.searchParams.get('date') || '',
@@ -47,16 +51,14 @@ export const actions: Actions = {
     if (!available.some(s => s.starts_at === startsAt && s.ends_at === endsAt)) {
       return fail(409, { form, error: 'That time slot is no longer offered for this tech. Pick a different one below.' });
     }
-    // Coordinates are best-effort. If the user picked an autocomplete suggestion,
-    // lat/lng are already present. Otherwise geocode the typed address (retry once
-    // so a transient geocoder outage doesn't drop a valid address). Jobs that still
-    // can't be located are still booked — they just won't appear on the route map,
-    // and the UI shows a clear notice instead of blocking the booking.
-    let lat = value.lat ?? null;
-    let lng = value.lng ?? null;
-    if ((lat == null || lng == null) && value.address?.trim()) {
+    // Coordinates are best-effort and server-authoritative. Never trust client-supplied
+    // lat/lng — invariant: lat/lng, if present, was derived from the current address
+    // by the server in this request. Client coords are UI state only (preview).
+    let lat: number | null = null;
+    let lng: number | null = null;
+    if (value.address?.trim()) {
       let coords = await geocode(value.address);
-      if (!coords) coords = await geocode(value.address); // retry transient failures
+      if (!coords) coords = await geocode(value.address); // one retry for transient provider failure
       if (coords) { lat = coords.lat; lng = coords.lng; }
     }
     const unmapped = lat == null || lng == null;

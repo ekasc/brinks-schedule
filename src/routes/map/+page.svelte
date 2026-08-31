@@ -22,7 +22,7 @@
   $: techItems = [{ value: 'all', label: 'All techs' }, ...data.techs.map((t) => ({ value: String(t.id), label: t.display_name }))];
   $: techCounts = (() => {
     const c: Record<string, number> = { all: data.jobs.length };
-    for (const t of data.techs) c[String(t.id)] = data.jobs.filter((j) => String(j.tech_id) === String(t.id)).length;
+    for (const t of data.techs) c[String(t.id)] = data.jobs.filter((j: any) => String(j.tech_id) === String(t.id)).length;
     return c;
   })();
 
@@ -33,7 +33,7 @@
   };
 
   $: visible = data.jobs.filter(
-    (j) =>
+    (j: any) =>
       (techFilter === 'all' || String(j.tech_id) === techFilter) &&
       (statusFilter === 'all' || j.status === statusFilter)
   );

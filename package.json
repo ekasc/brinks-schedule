@@ -12,6 +12,7 @@
     "seed": "node scripts/seed.js"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@sveltejs/adapter-cloudflare": "^7.2.9",
     "@sveltejs/adapter-node": "^5.2.0",
     "@sveltejs/kit": "^2.5.0",

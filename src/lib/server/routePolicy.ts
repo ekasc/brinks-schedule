@@ -36,9 +36,11 @@ export function getRedirect(path: string, user: { role: string } | null): string
     if (user.role === 'admin') return '/clients';
     return '/';
   }
+  if (path.startsWith('/admin')) {
+    return user.role === 'admin' ? null : '/';
+  }
   if (user.role === 'admin') {
     if (path === '/notifications' || path.startsWith('/notifications/') || path.startsWith('/api/notifications/')) return null;
-    if (path === '/admin' || path.startsWith('/admin/')) return null;
     if (path === '/clients' || path.startsWith('/clients/')) return null;
     if (path === '/export' || path.startsWith('/export/') || path.startsWith('/export?')) return null;
     return '/clients';

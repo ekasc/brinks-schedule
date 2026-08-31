@@ -20,14 +20,14 @@ export default defineConfig({
   },
   globalSetup: './tests/e2e/global-setup.ts',
   webServer: {
-    command: `PORT=${PORT} DB_PATH=/tmp/brinks-test-e2e.db JWT_SECRET=e2e-test-secret ORIGIN=${BASE_URL} node build/index.js`,
+    command: `PORT=${PORT} DB_PATH=/tmp/brinks-test-e2e.db JWT_SECRET=e2e-test-secret ORIGIN=${BASE_URL} pnpm preview --port ${PORT} --host 127.0.0.1`,
     url: `${BASE_URL}/login`,
     stdout: 'pipe',
     stderr: 'pipe',
     reuseExistingServer: !process.env.CI,
     timeout: 20_000,
     env: {
-      DB_PATH: './data/test-e2e.db',
+      DB_PATH: '/tmp/brinks-test-e2e.db',
       JWT_SECRET: 'e2e-test-secret',
     },
   },

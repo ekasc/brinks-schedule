@@ -6,6 +6,7 @@
   import type { PageData } from './$types';
   import 'leaflet/dist/leaflet.css';
   import { haversineKm, travelMinutes, fmtDist, fmtMin } from '$lib/geo';
+  import { ROUTE_TRAVEL_MODEL, FEASIBILITY } from '$lib/geo/travelModel';
   import { Select, Calendar, Popover, Button, Dialog } from 'bits-ui';
   import { CalendarDate, parseDate, today, getLocalTimeZone } from '@internationalized/date';
   import { swipeSheet } from '$lib/actions/swipeSheet';
@@ -74,8 +75,10 @@
     document.documentElement.style.overflowAnchor = (filterOpen || sheetOpen) ? 'none' : '';
   }
 
-  let marginMin = 15;
-  let speed = 40;
+  // Feasibility margin and travel speed are explicit policy — not silent defaults.
+  // See lib/geo/travelModel.ts for single sources.
+  let marginMin = FEASIBILITY.routeMarginMin;
+  let speed = ROUTE_TRAVEL_MODEL.speedKmh;
 
   const statusColor: Record<string, string> = {
     sent: '#0A84FF',
@@ -202,7 +205,7 @@
           </Popover.Trigger>
           <Popover.Portal>
             <Popover.Content class="z-[1002] w-[320px] rounded-[14px] border border-[var(--line)] bg-[var(--row)] p-3 shadow-xl" sideOffset={8} side="bottom" align="start">
-              <Calendar.Root type="single" value={routeCal} bind:placeholder={routePlaceholder} onValueChange={onRouteDateChange} locale="en-CA" weekdayFormat="short" fixedWeeks={true} class="w-full">
+              <Calendar.Root type="single" value={routeCal as any} bind:placeholder={routePlaceholder as any} onValueChange={onRouteDateChange as any} locale="en-CA" weekdayFormat="short" fixedWeeks={true} class="w-full">
                 <Calendar.Header class="flex items-center justify-between pb-3 gap-2">
                   <Calendar.PrevButton class="grid h-8 w-8 place-items-center rounded-full hover:bg-[var(--row2)] text-[var(--ink)]"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></Calendar.PrevButton>
                   <div class="flex items-center gap-2">
@@ -227,7 +230,7 @@
                     {#each routeWeeks as week}
                       <Calendar.GridRow class="flex justify-between">
                         {#each week as date}
-                          <Calendar.Cell date={date} month={routePlaceholder} class="p-0">
+                          <Calendar.Cell date={date} month={routePlaceholder as any} class="p-0">
                             <Calendar.Day class="grid h-8 w-8 place-items-center rounded-full text-[14px] hover:bg-[var(--row2)] data-[selected]:!bg-[var(--blue)] data-[selected]:!text-white data-[disabled]:opacity-30 data-[outside-month]:opacity-30 data-[today]:ring-1 data-[today]:ring-[var(--blue)]" />
                           </Calendar.Cell>
                         {/each}

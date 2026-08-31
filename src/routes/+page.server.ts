@@ -1,6 +1,6 @@
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { listJobs, listUsers } from '$lib/server/db';
+import { listJobsSummary, listUsers } from '$lib/server/db';
 
 function startOfDay(d: Date): Date { const x = new Date(d); x.setHours(0,0,0,0); return x; }
 function endOfDay(d: Date): Date { const x = new Date(d); x.setHours(23,59,59,999); return x; }
@@ -24,10 +24,10 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   if (isTech) {
     // technician only sees own jobs; only own card shown
     techs = [{ id: locals.user.id, display_name: locals.user.display_name, username: locals.user.username, role: 'tech' as const }];
-    allJobs = await listJobs(todayStart.getTime() / 1000, tomorrowEnd.getTime() / 1000, locals.user.id);
+    allJobs = await listJobsSummary(todayStart.getTime() / 1000, tomorrowEnd.getTime() / 1000, locals.user.id);
   } else {
     techs = await listUsers('tech');
-    allJobs = await listJobs(todayStart.getTime() / 1000, tomorrowEnd.getTime() / 1000);
+    allJobs = await listJobsSummary(todayStart.getTime() / 1000, tomorrowEnd.getTime() / 1000);
   }
 
   const myTechId = isTech ? locals.user.id : null;
@@ -44,7 +44,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     techs,
     upcoming,
     isTech,
-    isSales: locals.user.role === 'sales' || locals.user.role === 'admin',
+    isSales: !isTech,
     myTechId
   };
 };

@@ -24,11 +24,11 @@
     <div class="input-group">
       <label class="field">
         <span class="key">Username</span>
-        <input class={inpc} name="username" placeholder="username" autocomplete="username" autocapitalize="off" autocorrect="off" value={form?.username ?? ''} required aria-label="Username" />
+        <input class={inpc} id="username" name="username" placeholder="username" autocomplete="username" autocapitalize="off" autocorrect="off" value={form?.username ?? ''} required aria-label="Username" />
       </label>
       <label class="field">
         <span class="key">Password</span>
-        <input class={inpc} name="password" type="password" placeholder="••••••••" autocomplete="current-password" required aria-label="Password" />
+        <input class={inpc} id="password" name="password" type="password" placeholder="••••••••" autocomplete="current-password" required aria-label="Password" />
       </label>
     </div>
     <Button.Root type="submit" class="filled">Sign In</Button.Root>
