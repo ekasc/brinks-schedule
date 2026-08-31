@@ -29,6 +29,9 @@ importers:
       sveltekit-superforms:
         specifier: ^2.30.2
         version: 2.30.2(@sveltejs/kit@2.70.3(@sveltejs/vite-plugin-svelte@5.1.1(supports-color@10.2.2)(svelte@5.56.10)(vite@6.4.3(@types/node@26.4.0)(jiti@1.21.7)(lightningcss@1.33.0)))(svelte@5.56.10)(typescript@5.9.3)(vite@6.4.3(@types/node@26.4.0)(jiti@1.21.7)(lightningcss@1.33.0)))(svelte@5.56.10)(typescript@5.9.3)
+      web-push-neo:
+        specifier: ^0.1.2
+        version: 0.1.2
       zod:
         specifier: ^4.5.2
         version: 4.5.2
@@ -1365,6 +1368,9 @@ packages:
   joi@17.13.6:
     resolution: {integrity: sha512-ImNZaq/LSysofih+xIGYfR0WUXMA9GLUNB//YTCSrZptoRmVgaNAdJyi6K1kXi9pkLEoSkoI8I4UwtNiu/D7nw==}
 
+  jose@6.2.10:
+    resolution: {integrity: sha512-iiW7J9qRFlGxvCOIBDBDxFePQSn7ZMAnrYGhrrOo6siO/MIqwfyilLR27pkfDgUk+raLuzADS8A3S/KLBisc0g==}
+
   json-schema-to-ts@3.1.1:
     resolution: {integrity: sha512-+DWg8jCJG2TEnpy7kOm/7/AxaYoaRbjVB4LFZLySZlWn8exGs3A4OLJR966cVvU26N7X9TWxl+Jsw7dzAqKT6g==}
     engines: {node: '>=16'}
@@ -1952,6 +1958,10 @@ packages:
         optional: true
       jsdom:
         optional: true
+
+  web-push-neo@0.1.2:
+    resolution: {integrity: sha512-gl9uLsps1+6cmvdrAC61XSFqV2Gk3ue3BfPf/ofCODMOp5hQvyIX6LM6kL/PvvieFscQlTxz3cKmscXGw7JWcg==}
+    engines: {node: '>=20'}
 
   why-is-node-running@2.3.0:
     resolution: {integrity: sha512-hUrmaWBdVDcxvYqnyh09zunKzROWjbZTiNy8dBEjkS7ehEDQibXJ7XvlmtbwuTclUiIyN+CyXQD4Vmko8fNm8w==}
@@ -3049,6 +3059,8 @@ snapshots:
       '@sideway/pinpoint': 2.0.0
     optional: true
 
+  jose@6.2.10: {}
+
   json-schema-to-ts@3.1.1:
     dependencies:
       '@babel/runtime': 7.29.7
@@ -3629,6 +3641,10 @@ snapshots:
       '@types/node': 26.4.0
     transitivePeerDependencies:
       - msw
+
+  web-push-neo@0.1.2:
+    dependencies:
+      jose: 6.2.10
 
   why-is-node-running@2.3.0:
     dependencies:
