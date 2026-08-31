@@ -58,8 +58,8 @@ describe('sent blocks slot/conflicts', () => {
     // overlapping should conflict
     const r2 = await db.createJob({ tech_id: tech, booked_by: sales, client_name: 'Bob', address: '124 Main St', starts_at: s1 + 1800, ends_at: e1 + 1800 });
     assert.equal(r2.conflict, 'tech_busy');
-    // non-overlapping adjacent should succeed
-    const r3 = await db.createJob({ tech_id: tech, booked_by: sales, client_name: 'Carol', address: '125 Main St', starts_at: e1, ends_at: e1 + 3600 });
+    // non-overlapping with buffer should succeed (gap >= BUFFER_MIN=30)
+    const r3 = await db.createJob({ tech_id: tech, booked_by: sales, client_name: 'Carol', address: '125 Main St', starts_at: e1 + 1800, ends_at: e1 + 1800 + 3600 });
     assert.ok('id' in r3);
     // slots should exclude blocked interval (with buffer 30min default)
     const slots = await db.getAvailableSlots(tech, { fromTs: blockStart, toTs: blockEnd, durationMin: 90, stepMin: 30, bufferMin: 30 });

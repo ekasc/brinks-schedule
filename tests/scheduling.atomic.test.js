@@ -61,7 +61,7 @@ describe('atomic double-booking race', ()=>{
     const day='2030-07-02';
     await db.addAvailability(tech, hourTs(day,9), hourTs(day,17), null);
     const s1=hourTs(day,10), e1=hourTs(day,11);
-    const s2=hourTs(day,11), e2=hourTs(day,12);
+    const s2=hourTs(day,11,30), e2=hourTs(day,12,30);
     const r1=await db.createJob({ tech_id: tech, booked_by: sales, client_name:'C', address:'1 St', starts_at:s1, ends_at:e1 });
     const r2=await db.createJob({ tech_id: tech, booked_by: sales, client_name:'D', address:'2 St', starts_at:s2, ends_at:e2 });
     assert.ok('id' in r1 && 'id' in r2);

@@ -1,7 +1,7 @@
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { getJob, findUserById, setJobStatus, setJobCompleted } from '$lib/server/db';
-import { assertJobLoadAccess, canViewJob, canChangeJobStatus } from '$lib/server/jobAccess';
+import { assertJobLoadAccess, canViewJob, canChangeJobStatus, canChangeJobCompletion, sanitizeJob } from '$lib/server/jobAccess';
 import { reconcileAndDeliver } from '$lib/server/notifications';
 
 const ALL_STATUSES = ['sent','signed','cancelled'] as const;
@@ -17,8 +17,9 @@ export const load: PageServerLoad = async ({ params, locals }) => {
   // Single source for PII/edit — preserves current effective behavior (admin never reaches here, tech own, sales own-booked).
   const canSeePii = canChangeJobStatus(locals.user, job);
   const canEdit = canSeePii;
+  const jobDto = sanitizeJob(job as any, locals.user);
   return {
-    job,
+    job: jobDto,
     tech: tech ? { id: tech.id, display_name: tech.display_name, username: tech.username } : null,
     booker: booker ? { id: booker.id, display_name: booker.display_name } : null,
     canEdit,
@@ -48,6 +49,7 @@ export const actions: Actions = {
     const job = await getJob(id);
     if (!job) return fail(404, { error: 'not found' });
     if (!canViewJob(locals.user, job)) return fail(403, { error: 'forbidden' });
+    if (!canChangeJobCompletion(locals.user, job)) return fail(403, { error: 'forbidden' });
     const data = await request.formData();
     const completed = String(data.get('completed') || '0') === '1';
     await setJobCompleted(id, completed ? Math.floor(Date.now() / 1000) : null, locals.user.id);

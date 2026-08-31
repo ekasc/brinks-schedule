@@ -54,7 +54,8 @@ export const actions: Actions = {
     let lat: number | null = null;
     let lng: number | null = null;
     if (value.address?.trim()) {
-      const coords = await geocode(value.address);
+      let coords = await geocode(value.address);
+      if (!coords) coords = await geocode(value.address); // one retry for transient provider failure
       if (coords) { lat = coords.lat; lng = coords.lng; }
     }
     const unmapped = lat == null || lng == null;
