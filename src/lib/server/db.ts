@@ -6,6 +6,7 @@ import { env as privateEnv } from '$env/dynamic/private';
 import { getRequestEvent } from '$app/server';
 import { dev } from '$app/environment';
 import { geocode } from './geocode';
+import { BUFFER_MIN } from './availability/policy';
 
 // --- PII encryption (works with nodejs_compat on Workers) ---
 import crypto from 'node:crypto';
@@ -585,7 +586,7 @@ export async function reconcileJobNotifications(){
 }
 export async function getAvailableSlots(techId: number, opts: any={}): Promise<{starts_at:number; ends_at:number}[]>{
   const fromTs = opts.fromTs ?? Math.floor(Date.now()/1000); const horizon = new Date(); horizon.setDate(horizon.getDate()+SLOT_HORIZON_DAYS); const toTs = opts.toTs ?? Math.floor(horizon.getTime()/1000);
-  const dur = (opts.durationMin ?? 90)*60; const step=(opts.stepMin ??30)*60; const buf=(opts.bufferMin ??30)*60;
+  const dur = (opts.durationMin ?? 90)*60; const step=(opts.stepMin ??30)*60; const buf=(opts.bufferMin ?? BUFFER_MIN)*60;
   const templates = await listTemplates(techId);
   const extraBlocks = await listAvailability(techId, fromTs, toTs);
   const availableTemplates = templates.filter((t:any)=> (t.kind ?? 'available') === 'available');
