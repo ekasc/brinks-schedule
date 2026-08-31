@@ -27,7 +27,7 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     timeout: 20_000,
     env: {
-      DB_PATH: './data/test-e2e.db',
+      DB_PATH: '/tmp/brinks-test-e2e.db',
       JWT_SECRET: 'e2e-test-secret',
     },
   },

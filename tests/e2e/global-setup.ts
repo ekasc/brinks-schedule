@@ -4,7 +4,7 @@ import Database from 'better-sqlite3';
 import bcrypt from 'bcryptjs';
 import { initializeSqliteSchema } from '../../src/lib/server/schema';
 
-const DB_PATH = '/tmp/brinks-test-e2e.db';
+const DB_PATH = process.env.DB_PATH || '/tmp/brinks-test-e2e.db';
 
 export default async function globalSetup() {
   if (fs.existsSync(DB_PATH)) fs.rmSync(DB_PATH);
