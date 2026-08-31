@@ -271,6 +271,16 @@ export async function recordLoginResult(key:string,success:boolean){
 // availability
 export async function addAvailability(techId: number, startsAt: number, endsAt: number, note: string|null){ const r:any = await d1Run(`INSERT INTO availability_blocks (tech_id, starts_at, ends_at, note) VALUES (?, ?, ?, ?)`, techId, startsAt, endsAt, note); return Number(r.lastInsertRowid ?? r.meta?.last_row_id ?? 0); }
 export async function listAvailability(techId: number, fromTs: number, toTs: number){ return await d1All(`SELECT * FROM availability_blocks WHERE tech_id = ? AND starts_at < ? AND ends_at > ? ORDER BY starts_at`, techId, toTs, fromTs) as AvailabilityBlock[]; }
+export async function listAvailabilityForTechs(techIds: number[], fromTs: number, toTs: number): Promise<AvailabilityBlock[]>{
+  if (!techIds.length) return [];
+  const ph = techIds.map(()=> '?').join(',');
+  return await d1All(`SELECT * FROM availability_blocks WHERE tech_id IN (${ph}) AND starts_at < ? AND ends_at > ? ORDER BY tech_id, starts_at`, ...techIds, toTs, fromTs) as AvailabilityBlock[];
+}
+export async function listUnavailableForTechs(techIds: number[], fromTs: number, toTs: number): Promise<AvailabilityUnavailable[]>{
+  if (!techIds.length) return [];
+  const ph = techIds.map(()=> '?').join(',');
+  return await d1All(`SELECT * FROM availability_unavailable WHERE tech_id IN (${ph}) AND starts_at < ? AND ends_at > ? ORDER BY tech_id, starts_at`, ...techIds, toTs, fromTs) as AvailabilityUnavailable[];
+}
 export async function removeAvailability(id: number, techId: number){ await d1Run(`DELETE FROM availability_blocks WHERE id = ? AND tech_id = ?`, id, techId); }
 export async function copyAvailabilityWeek(techId: number, fromWeekStartTs: number, toWeekStartTs: number): Promise<number>{
   const fromEnd = fromWeekStartTs + 7*86400; const blocks = await listAvailability(techId, fromWeekStartTs, fromEnd); if (!blocks.length) return 0;
@@ -680,6 +690,67 @@ export async function getAvailableSlotsForDurations(techId: number, baseOpts: an
     out[durationMin]=slots;
   }
   return out;
+}
+// True N+1 elimination for /book: fetch all techs' raw intervals in 4 queries total, then partition per tech.
+export async function getAvailableSlotsForDurationsForTechs(techIds: number[], baseOpts: any, durations: number[]): Promise<Record<number, Record<number, {starts_at:number; ends_at:number}[]>>>{
+  if (!techIds.length) return {};
+  const fromTs = baseOpts.fromTs ?? Math.floor(Date.now()/1000); const horizon = new Date(); horizon.setDate(horizon.getDate()+SLOT_HORIZON_DAYS); const toTs = baseOpts.toTs ?? Math.floor(horizon.getTime()/1000);
+  const step=(baseOpts.stepMin ??30)*60; const buf=(baseOpts.bufferMin ?? BUFFER_MIN)*60;
+  const [allTemplates, allBlocks, allUnavailable, allJobs] = await Promise.all([
+    listTemplatesForTechs(techIds),
+    listAvailabilityForTechs(techIds, fromTs, toTs),
+    listUnavailableForTechs(techIds, fromTs, toTs),
+    listJobsForTechsSummary(fromTs-buf, toTs+buf, techIds)
+  ]);
+  const byTech: Record<number, Record<number, {starts_at:number; ends_at:number}[]>> = {};
+  const nowSec=Math.floor(Date.now()/1000);
+  for (const techId of techIds){
+    const templates = allTemplates.filter((t:any)=> t.tech_id===techId);
+    const extraBlocks = allBlocks.filter((b:any)=> b.tech_id===techId);
+    const unavailable = allUnavailable.filter((u:any)=> u.tech_id===techId);
+    const jobs = allJobs.filter((j:any)=> j.tech_id===techId && j.status!=='cancelled');
+    const availableTemplates = templates.filter((t:any)=> (t.kind ?? 'available')==='available');
+    const unavailableTemplates = templates.filter((t:any)=> t.kind==='unavailable');
+    const expanded:{starts_at:number; ends_at:number}[]=[];
+    if (availableTemplates.length){
+      const cur=new Date(fromTs*1000); cur.setHours(0,0,0,0);
+      while (Math.floor(cur.getTime()/1000) < toTs){
+        const dow=cur.getDay(); const base=Math.floor(cur.getTime()/1000);
+        for(const t of availableTemplates) if(t.dow===dow){
+          const s=base+t.start_min*60; const e=base+t.end_min*60; if(e<=s) continue; const cs=Math.max(s,fromTs); const ce=Math.min(e,toTs); if(ce>cs) expanded.push({starts_at:cs, ends_at:ce});
+        } cur.setDate(cur.getDate()+1);
+      }
+    }
+    for(const b of extraBlocks) expanded.push({starts_at:b.starts_at, ends_at:b.ends_at});
+    const perDur: Record<number, any>={};
+    if (!expanded.length){ for(const d of durations) perDur[d]=[]; byTech[techId]=perDur; continue; }
+    const blocked:{start:number; end:number}[]=[];
+    for(const u of unavailable) blocked.push({start:u.starts_at, end:u.ends_at});
+    for(const j of jobs) blocked.push({start:j.starts_at-buf, end:j.ends_at+buf});
+    if (unavailableTemplates.length){
+      const cur=new Date(fromTs*1000); cur.setHours(0,0,0,0);
+      while (Math.floor(cur.getTime()/1000) < toTs){
+        const dow=cur.getDay(); const base=Math.floor(cur.getTime()/1000);
+        for(const t of unavailableTemplates) if(t.dow===dow){
+          const s=base+t.start_min*60; const e=base+t.end_min*60; if(e<=s) continue; const cs=Math.max(s,fromTs); const ce=Math.min(e,toTs); if(ce>cs) blocked.push({start:cs, end:ce});
+        } cur.setDate(cur.getDate()+1);
+      }
+    }
+    function isBlocked(s:number,e:number){ for(const b of blocked) if(s<b.end && e>b.start) return true; return false; }
+    for(const durationMin of durations){
+      const dur=durationMin*60; const seen=new Set<string>(); const slots:any[]=[];
+      for(const blk of expanded){
+        let s=Math.max(blk.starts_at, fromTs); const sDate=new Date(s*1000); const sMin=sDate.getMinutes();
+        if(sMin!==0 && sMin!==30){ const bump=30-(sMin%30); s+=bump*60; }
+        while(s+dur<=blk.ends_at && s+dur<=toTs){
+          const e=s+dur; const key=`${s}-${e}`; if(s>=nowSec && !isBlocked(s,e) && !seen.has(key)){ seen.add(key); slots.push({starts_at:s, ends_at:e}); } s+=step;
+        }
+      }
+      perDur[durationMin]=slots;
+    }
+    byTech[techId]=perDur;
+  }
+  return byTech;
 }
 export async function listAllJobsForMap(){ return await d1All(`SELECT j.id, j.client_name, j.address, j.lat, j.lng, j.status, j.starts_at, j.tech_id, t.display_name AS tech_name FROM jobs j JOIN users t ON t.id=j.tech_id WHERE j.lat IS NOT NULL AND j.lng IS NOT NULL ORDER BY j.starts_at`) as any; }
 export async function listJobsForMapForTech(techId: number){ return await d1All(`SELECT j.id, j.client_name, j.address, j.lat, j.lng, j.status, j.starts_at, j.tech_id, t.display_name AS tech_name FROM jobs j JOIN users t ON t.id=j.tech_id WHERE j.tech_id = ? AND j.lat IS NOT NULL AND j.lng IS NOT NULL ORDER BY j.starts_at`, techId) as any; }

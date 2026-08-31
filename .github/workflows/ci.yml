@@ -37,6 +37,12 @@ jobs:
       - name: Install Playwright (chromium + deps)
         run: pnpm exec playwright install --with-deps chromium
 
+      - name: Type check
+        run: pnpm check
+
+      - name: Unit tests
+        run: pnpm exec vitest run --exclude tests/e2e
+
       - name: Build
         run: pnpm build
 
