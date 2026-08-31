@@ -26,6 +26,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     }
   }
   return {
+    // zod 4.5.2 vs sveltekit-superforms: _zod version mismatch, cast required
     form: await superValidate(zod4(bookJobSchema as any)),
     techs: techs.map(t => ({ id: t.id, display_name: t.display_name })), slotsByTech, slotsByTechByDuration,
     preselectTech, preselectDate: url.searchParams.get('date') || '',
