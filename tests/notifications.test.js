@@ -8,7 +8,7 @@ let dir;
 
 beforeAll(async () => {
   dir=mkdtempSync(join(tmpdir(),'schedule-notifications-'));
-  db=await import('../src/lib/server/db.ts');
+  db=await import('../src/lib/server/db');
   db.__setTestDbPath(join(dir,'test.db'));
   await db.listUsers();
 });

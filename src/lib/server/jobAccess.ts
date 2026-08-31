@@ -33,20 +33,6 @@ export function canChangeJobStatus(user: UserTarget, job: JobTarget | null | und
   return false;
 }
 
-// PII DTO: never serialize decrypted private fields to unauthorized users.
-// Private fields are exactly those decrypted in db.ts:decryptJobRow.
-const PII_FIELDS = ['dob','telus_pin','id_last4','emergency_name','emergency_number','emergency_relation','verbal_password'] as const;
-export function sanitizeJob<T extends Record<string, any>>(job: T, user: UserTarget): T {
-  if (!job) return job;
-  if (canChangeJobStatus(user, job as any)) return job;
-  const out: Record<string, any> = { ...job };
-  for (const f of PII_FIELDS) if (f in out) out[f] = null;
-  if ('_decryptFailed' in out) delete out._decryptFailed;
-  return out as T;
-}
-export function sanitizeJobs<T extends Record<string, any>>(jobs: T[], user: UserTarget): T[] {
-  return jobs.map(j => sanitizeJob(j, user));
-}
 // Complete follows the same mutation policy as status — sales own-booked, tech own.
 export function canChangeJobCompletion(user: UserTarget, job: JobTarget | null | undefined): boolean {
   return canChangeJobStatus(user, job);

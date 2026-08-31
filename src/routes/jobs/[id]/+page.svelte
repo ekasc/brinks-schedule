@@ -45,8 +45,8 @@
 
   // Map pin-drop UI removed — location is set at booking time (auto-geocoded) and shown read-only.
 
-  $: j = data.job;
-  $: idLabel = j.id_type === 'dl' ? "Driver's licence" : j.id_type === 'passport' ? 'Passport' : j.id_type === 'bcid' ? 'BCID' : j.id_type === 'other' ? 'Other' : '—';
+  $: j = data.job as any;
+  $: idLabel = (j as any).id_type === 'dl' ? "Driver's licence" : (j as any).id_type === 'passport' ? 'Passport' : (j as any).id_type === 'bcid' ? 'BCID' : (j as any).id_type === 'other' ? 'Other' : '—';
   $: services = [
     j.svc_internet ? { label: 'Internet', detail: j.svc_internet_detail } : null,
     j.svc_home_phone ? { label: 'Home phone', detail: j.svc_home_phone_detail } : null,

@@ -10,7 +10,7 @@
   import type { PageData, ActionData } from './$types';
   export let data: PageData;
   export let form: ActionData;
-  const { form: bookForm, errors, enhance } = superForm(data.form, { dataType: 'form', resetForm: false });
+  const { form: bookForm, errors, enhance } = superForm(data.form as any, { dataType: 'form', resetForm: false } as any);
 
   let techId = data.preselectTech;
   let durationMin = data.durationMin;
@@ -39,8 +39,8 @@
   let selLat: number | null = null;
   let selLng: number | null = null;
 
-  $: if (form?.starts_at && startSlotTs === 0) {
-    const t = new Date(form.starts_at).getTime() / 1000;
+  $: if ((form as any)?.starts_at && startSlotTs === 0) {
+    const t = new Date((form as any).starts_at).getTime() / 1000;
     if (slots.some(s => s.starts_at === t)) startSlotTs = t;
   }
 
@@ -250,7 +250,7 @@
         <input class={inpc} name="client_name" bind:value={$bookForm.client_name} required aria-required="true" autocomplete="name" placeholder="Full name *" aria-label="Full name (required)" aria-invalid={$errors.client_name ? "true" : undefined} style:border-color={$errors.client_name ? "var(--red)" : undefined} />
       {#if $errors.client_name}<span class="px-1 pt-1 text-[13px] leading-tight text-[var(--red)]" transition:fly={{ y: -4, duration: 160, easing: cubicOut }}>{$errors.client_name}</span>{/if}</label>
       <span id="sec-customer-addr" class="block scroll-mt-28" aria-hidden="true"></span>
-      <AddressAutocomplete name="address" bind:value={$bookForm.address} bind:lat={selLat} bind:lng={selLng} placeholder="Address *" ariaLabel="Address (required)" error={$errors.address} showKey={false} required />
+      <AddressAutocomplete name="address" bind:value={$bookForm.address} bind:lat={selLat} bind:lng={selLng} placeholder="Address *" ariaLabel="Address (required)" error={($errors as any).address?.[0]} showKey={false} required />
       {#if $bookForm.address?.trim()}
         {#if selLat != null && selLng != null}
           <span class="px-1 pt-1 text-[13px] leading-tight text-[var(--blue)]">✓ Map location set — this job will appear on the route map.</span>
@@ -276,7 +276,7 @@
           </Popover.Trigger>
           <Popover.Portal>
             <Popover.Content class="z-[1000] w-[320px] rounded-[14px] border border-[var(--line)] bg-[var(--row)] p-3 shadow-xl" sideOffset={8} side="bottom" align="start">
-              <Calendar.Root type="single" value={dobCal} bind:placeholder={dobPlaceholder} onValueChange={onDobChange} maxValue={today(getLocalTimeZone())} locale="en-CA" weekdayFormat="short" fixedWeeks={true} class="w-full">
+              <Calendar.Root type="single" value={dobCal as any} bind:placeholder={dobPlaceholder as any} onValueChange={onDobChange as any} maxValue={today(getLocalTimeZone())} locale="en-CA" weekdayFormat="short" fixedWeeks={true} class="w-full">
                 <Calendar.Header class="flex items-center justify-between pb-3 gap-2">
                   <Calendar.PrevButton class="grid h-8 w-8 place-items-center rounded-full hover:bg-[var(--row2)] text-[var(--ink)] active:!scale-100"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></Calendar.PrevButton>
                   <div class="flex items-center gap-2">
@@ -301,7 +301,7 @@
                     {#each dobWeeks as week}
                       <Calendar.GridRow class="flex justify-between">
                         {#each week as date}
-                          <Calendar.Cell date={date} month={dobPlaceholder} class="p-0">
+                          <Calendar.Cell date={date} month={dobPlaceholder as any} class="p-0">
                             <Calendar.Day class="grid h-8 w-8 place-items-center rounded-full text-[14px] hover:bg-[var(--row2)] active:!scale-100 data-[selected]:!bg-[var(--blue)] data-[selected]:!text-white data-[disabled]:opacity-30 data-[outside-month]:opacity-30 data-[today]:ring-1 data-[today]:ring-[var(--blue)]" />
                           </Calendar.Cell>
                         {/each}

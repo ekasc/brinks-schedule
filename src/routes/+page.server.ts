@@ -44,7 +44,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     techs,
     upcoming,
     isTech,
-    isSales: locals.user.role === 'sales' || locals.user.role === 'admin',
+    isSales: !isTech,
     myTechId
   };
 };

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { getRedirect, isDeprecated, isAdminBlocked } from '../src/lib/server/routePolicy.ts';
+import { getRedirect, isDeprecated, isAdminBlocked } from '../src/lib/server/routePolicy';
 
 describe('deprecation redirect logic', () => {
   test('income/stats deprecated', () => {
@@ -52,7 +52,7 @@ describe('admin route policy', () => {
     assert.equal(getRedirect('/export?from=2024-01-01', { role: 'sales' }), '/');
   });
   test('dashboard view model - tech personal queue via production helper', async () => {
-    const { getTodayHeading, shouldShowTechCards, shouldShowTechsBusy, shouldShowExportLink } = await import('../src/lib/dashboardView.ts');
+    const { getTodayHeading, shouldShowTechCards, shouldShowTechsBusy, shouldShowExportLink } = await import('../src/lib/dashboardView');
     assert.equal(getTodayHeading(true, 3), 'Your jobs · 3');
     assert.equal(getTodayHeading(false, 5), 'Today · 5 total');
     assert.equal(shouldShowTechCards(true), false);
@@ -107,7 +107,7 @@ describe('admin route policy', () => {
 
 describe('job route authorization - cross-tech forbidden (real helper)', () => {
   test('tech cannot load or act on another tech job - real helper throws 403', async () => {
-    const { isTechForbidden, assertJobLoadAccess } = await import('../src/lib/server/jobAccess.ts');
+    const { isTechForbidden, assertJobLoadAccess } = await import('../src/lib/server/jobAccess');
     const techA = { id: 101, role: 'tech' };
     const techBJob = { tech_id: 202 };
     const ownJob = { tech_id: 101 };
@@ -127,7 +127,7 @@ describe('technician scoping (db)', () => {
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'brinks-auth-'));
     dbPath = join(tmpDir, 'test.db');
-    db = await import('../src/lib/server/db.ts');
+    db = await import('../src/lib/server/db');
     db.__setTestDbPath(dbPath);
   });
   afterAll(() => {
