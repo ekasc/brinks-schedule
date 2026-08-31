@@ -212,6 +212,11 @@
 {#if data.canSeePii}
   <div class="group">
     <div class="group-title">Customer — private</div>
+    {#if j._decryptFailed?.length}
+      <div class="mx-4 mt-3 rounded-[10px] border border-amber-300 bg-amber-50 px-3 py-2 text-[13px] leading-snug text-amber-900" role="alert">
+        ⚠ Decryption failed for: {j._decryptFailed.join(', ')} — re-enter. Ciphertext is never shown.
+      </div>
+    {/if}
     <div class="group-rows">
       {#if j.dob}
         <div class="row-line">

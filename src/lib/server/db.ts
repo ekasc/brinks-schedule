@@ -34,14 +34,26 @@ export function decryptField(cipherText: string | null): string | null {
     decipher.setAuthTag(Buffer.from(tagB64, 'base64'));
     const dec = Buffer.concat([decipher.update(Buffer.from(dataB64, 'base64')), decipher.final()]);
     return dec.toString('utf8');
-  } catch { return cipherText; }
+  } catch {
+    // Never return ciphertext as plaintext — preserve invariant.
+    // Caller (decryptJobRow) tracks that this was a decrypt failure, distinct from absent (null).
+    return null;
+  }
 }
-function decryptJobRow<T extends Record<string, any>>(row: T): T {
-  if (!row) return row;
+function decryptJobRow<T extends Record<string, any>>(row: T): T & { _decryptFailed?: string[] } {
+  if (!row) return row as T & { _decryptFailed?: string[] };
   const f = ['telus_pin','id_last4','emergency_name','emergency_number','emergency_relation','verbal_password','dob'];
-  const out = { ...row };
-  for (const k of f) if (k in out) (out as any)[k] = decryptField((out as any)[k]);
-  return out;
+  const out: Record<string, any> = { ...row };
+  const failed: string[] = [];
+  for (const k of f) if (k in out) {
+    const orig = out[k];
+    const wasEncrypted = typeof orig === 'string' && orig.startsWith('enc:');
+    const decrypted = decryptField(orig);
+    out[k] = decrypted;
+    if (wasEncrypted && decrypted == null) failed.push(k);
+  }
+  if (failed.length) out._decryptFailed = failed;
+  return out as T & { _decryptFailed?: string[] };
 }
 
 // --- D1 vs local detection ---
