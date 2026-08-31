@@ -468,8 +468,7 @@
   </div>
 
   <input type="hidden" name="tech_id" value={techId} />
-  <input type="hidden" name="lat" value={selLat ?? ''} />
-  <input type="hidden" name="lng" value={selLng ?? ''} />
+  <!-- selLat/selLng are UI state only (map preview). Server geocodes address authoritatively — never trust client coords. -->
 
   <!-- Time slots — 2-tab: List / Calendar -->
   <div id="sec-time" class="group group--loose scroll-mt-24">

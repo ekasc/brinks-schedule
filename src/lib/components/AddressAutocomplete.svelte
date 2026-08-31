@@ -21,6 +21,10 @@
   function onChange() {
     active = -1;
     clearTimeout(debounce);
+    // Invalidate server-untrusted coords whenever address changes — preserves
+    // invariant: lat/lng, if present, was derived from the current address.
+    lat = null;
+    lng = null;
     const q = value.trim();
     if (q.length < 3) {
       suggestions = [];

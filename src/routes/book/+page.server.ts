@@ -47,16 +47,13 @@ export const actions: Actions = {
     if (!available.some(s => s.starts_at === startsAt && s.ends_at === endsAt)) {
       return fail(409, { form, error: 'That time slot is no longer offered for this tech. Pick a different one below.' });
     }
-    // Coordinates are best-effort. If the user picked an autocomplete suggestion,
-    // lat/lng are already present. Otherwise geocode the typed address (retry once
-    // so a transient geocoder outage doesn't drop a valid address). Jobs that still
-    // can't be located are still booked — they just won't appear on the route map,
-    // and the UI shows a clear notice instead of blocking the booking.
-    let lat = value.lat ?? null;
-    let lng = value.lng ?? null;
-    if ((lat == null || lng == null) && value.address?.trim()) {
-      let coords = await geocode(value.address);
-      if (!coords) coords = await geocode(value.address); // retry transient failures
+    // Coordinates are best-effort and server-authoritative. Never trust client-supplied
+    // lat/lng — invariant: lat/lng, if present, was derived from the current address
+    // by the server in this request. Client coords are UI state only (preview).
+    let lat: number | null = null;
+    let lng: number | null = null;
+    if (value.address?.trim()) {
+      const coords = await geocode(value.address);
       if (coords) { lat = coords.lat; lng = coords.lng; }
     }
     const unmapped = lat == null || lng == null;
