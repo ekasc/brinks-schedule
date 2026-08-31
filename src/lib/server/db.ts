@@ -625,7 +625,7 @@ async function fetchAvailabilityRaw(techId: number, fromTs: number, toTs: number
   const templates = await listTemplates(techId);
   const extraBlocks = await listAvailability(techId, fromTs, toTs);
   const unavailable = await listUnavailable(techId, fromTs, toTs);
-  const jobs = (await listJobs(fromTs-buf, toTs+buf, techId)).filter((j:any)=>j.status!=='cancelled');
+  const jobs = (await listJobsSummary(fromTs-buf, toTs+buf, techId)).filter((j:any)=>j.status!=='cancelled');
   return { templates, extraBlocks, unavailable, jobs };
 }
 export async function getAvailableSlots(techId: number, opts: any={}): Promise<{starts_at:number; ends_at:number}[]>{
@@ -724,6 +724,30 @@ export async function listJobsForTechs(fromTs: number, toTs: number, techIds: nu
   const ph = techIds.map(()=> '?').join(',');
   const rows = await d1All(`SELECT j.*, t.display_name AS tech_name, b.display_name AS booker_name FROM jobs j JOIN users t ON t.id=j.tech_id JOIN users b ON b.id=j.booked_by WHERE j.tech_id IN (${ph}) AND j.starts_at < ? AND j.ends_at > ? ORDER BY j.starts_at`, ...techIds, toTs, fromTs);
   return (rows as any[]).map(decryptJobRow);
+}
+// Safe boundary: summary queries select only non-PII fields and do not decrypt.
+// PII fields (dob, telus_pin, id_last4, emergency_*, verbal_password) are never
+// selected here, so they cannot be accidentally serialized.
+const SAFE_JOB_COLS = `j.id, j.tech_id, j.booked_by, j.client_name, j.address, j.lat, j.lng, j.starts_at, j.ends_at, j.status, j.completed_at, j.notes, j.email, j.id_type, j.svc_internet, j.svc_internet_detail, j.svc_home_phone, j.svc_home_phone_detail, j.svc_tv, j.svc_tv_detail, j.themes, j.security_offered, j.phone, j.price_cents, j.payout_cents, j.created_at, j.updated_at, t.display_name AS tech_name, b.display_name AS booker_name`;
+export async function listJobsSummary(fromTs: number, toTs: number, techId?: number): Promise<JobWithTech[]>{
+  let rows:any[];
+  if (techId!=null) rows = await d1All(`SELECT ${SAFE_JOB_COLS} FROM jobs j JOIN users t ON t.id=j.tech_id JOIN users b ON b.id=j.booked_by WHERE j.tech_id = ? AND j.starts_at < ? AND j.ends_at > ? ORDER BY j.starts_at`, techId, toTs, fromTs);
+  else rows = await d1All(`SELECT ${SAFE_JOB_COLS} FROM jobs j JOIN users t ON t.id=j.tech_id JOIN users b ON b.id=j.booked_by WHERE j.starts_at < ? AND j.ends_at > ? ORDER BY j.starts_at`, toTs, fromTs);
+  return rows as any;
+}
+export async function listJobsForTechsSummary(fromTs: number, toTs: number, techIds: number[]): Promise<JobWithTech[]>{
+  if (!techIds.length) return [];
+  const ph = techIds.map(()=> '?').join(',');
+  const rows = await d1All(`SELECT ${SAFE_JOB_COLS} FROM jobs j JOIN users t ON t.id=j.tech_id JOIN users b ON b.id=j.booked_by WHERE j.tech_id IN (${ph}) AND j.starts_at < ? AND j.ends_at > ? ORDER BY j.starts_at`, ...techIds, toTs, fromTs);
+  return rows as any;
+}
+export async function getJobSummary(id: number): Promise<JobWithTech|undefined>{
+  const row = await d1Get(`SELECT ${SAFE_JOB_COLS} FROM jobs j JOIN users t ON t.id=j.tech_id JOIN users b ON b.id=j.booked_by WHERE j.id = ?`, id) as any;
+  return row as any;
+}
+export async function getJobPrivate(id: number): Promise<JobWithTech|undefined>{
+  const row = await d1Get(`SELECT j.*, t.display_name AS tech_name, b.display_name AS booker_name FROM jobs j JOIN users t ON t.id=j.tech_id JOIN users b ON b.id=j.booked_by WHERE j.id = ?`, id) as any;
+  if (!row) return undefined; return decryptJobRow(row) as any;
 }
 export async function getIncomeForUser(userId: number, role: string, fromTs?: number, toTs?: number){
   let where=''; const params:any[]=[];

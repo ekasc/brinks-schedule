@@ -1,6 +1,6 @@
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
-import { listTemplatesForTechs, setPatternsForTech, addUnavailable, removeUnavailable, listAllUnavailableForTechs, listJobsForTechs, listActiveUsers, findUserById } from '$lib/server/db';
+import { listTemplatesForTechs, setPatternsForTech, addUnavailable, removeUnavailable, listAllUnavailableForTechs, listJobsForTechsSummary, listJobsSummary, listActiveUsers, findUserById } from '$lib/server/db';
 import { notifyUser } from '$lib/server/notifications';
 
 export const load: PageServerLoad = async ({ locals }) => {
@@ -16,7 +16,7 @@ export const load: PageServerLoad = async ({ locals }) => {
     const [allTemplates, allUnavailable, allJobs] = await Promise.all([
       listTemplatesForTechs(techIds),
       listAllUnavailableForTechs(techIds),
-      listJobsForTechs(now, horizon, techIds)
+      listJobsForTechsSummary(now, horizon, techIds)
     ]);
     for (const t of techs) {
       templatesByTech[t.id] = allTemplates.filter((r:any)=> r.tech_id === t.id);
@@ -83,7 +83,7 @@ export const actions: Actions = {
     if (locals.user.role==='tech' && techId!==locals.user.id) return fail(403, { error: 'forbidden' });
     const target = await findUserById(techId);
     if (!target || target.role!=='tech') return fail(400, { error: 'target not found' });
-    const conflictingJobs = (await listJobs(startsAt, endsAt, techId)).filter((job:any) => job.status !== 'cancelled');
+    const conflictingJobs = (await listJobsSummary(startsAt, endsAt, techId)).filter((job:any) => job.status !== 'cancelled');
     if (conflictingJobs.length && !force) {
       return fail(409, {
         warning: 'This blocked time overlaps an existing booking.',

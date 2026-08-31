@@ -91,6 +91,37 @@ describe('sent blocks slot/conflicts', () => {
     const r2 = await db.createJob({ tech_id: tech, booked_by: sales, client_name: 'Eve', address: '2 St', starts_at: s, ends_at: e });
     assert.ok('id' in r2, 'cancelled job should not block');
   });
+
+  test('buffer edge 29m rejected, 30m allowed', async () => {
+    const tech = await createTech('TechBuffer');
+    const sales = await createSales('SalesBuffer');
+    const day = '2030-06-16';
+    await db.addAvailability(tech, hourTs(day, 9), hourTs(day, 17), null);
+    const s1 = hourTs(day, 10), e1 = hourTs(day, 11);
+    const r1 = await db.createJob({ tech_id: tech, booked_by: sales, client_name:'Buf1', address:'a', starts_at:s1, ends_at:e1 });
+    assert.ok('id' in r1);
+    const r2 = await db.createJob({ tech_id: tech, booked_by: sales, client_name:'Buf2', address:'a', starts_at: hourTs(day,11,29), ends_at: hourTs(day,12,29) });
+    assert.equal(r2.conflict, 'tech_busy');
+    const r3 = await db.createJob({ tech_id: tech, booked_by: sales, client_name:'Buf3', address:'a', starts_at: hourTs(day,11,30), ends_at: hourTs(day,12,30) });
+    assert.ok('id' in r3);
+  });
+
+  test('concurrent buffer race 10-11 vs 11-12 exactly one succeeds', async () => {
+    const tech = await createTech('TechRaceBuf');
+    const sales = await createSales('SalesRaceBuf');
+    const day='2030-06-17';
+    await db.addAvailability(tech, hourTs(day,9), hourTs(day,17), null);
+    const sA=hourTs(day,10), eA=hourTs(day,11);
+    const sB=hourTs(day,11), eB=hourTs(day,12);
+    const pA = db.createJob({ tech_id: tech, booked_by: sales, client_name:'RaceA', address:'a', starts_at:sA, ends_at:eA });
+    const pB = db.createJob({ tech_id: tech, booked_by: sales, client_name:'RaceB', address:'a', starts_at:sB, ends_at:eB });
+    const [rA,rB]=await Promise.all([pA,pB]);
+    const successes=[rA,rB].filter(r=>'id' in r);
+    const conflicts=[rA,rB].filter(r=>'conflict' in r);
+    assert.equal(successes.length, 1);
+    assert.equal(conflicts.length, 1);
+    assert.equal(conflicts[0].conflict,'tech_busy');
+  });
 });
 
 describe('full availability containment', () => {

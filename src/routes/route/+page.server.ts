@@ -1,7 +1,6 @@
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { listJobs, listUsers } from '$lib/server/db';
-import { sanitizeJobs } from '$lib/server/jobAccess';
+import { listJobsSummary, listUsers } from '$lib/server/db';
 
 export const load: PageServerLoad = async ({ locals, url }) => {
   if (!locals.user) throw redirect(302, '/login');
@@ -16,8 +15,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     const dayStart = Math.floor(new Date(y, m - 1, d, 0, 0, 0, 0).getTime() / 1000);
     const nextDay = new Date(y, m - 1, d, 0, 0, 0, 0); nextDay.setDate(nextDay.getDate() + 1);
     const dayEnd = Math.floor(nextDay.getTime() / 1000);
-    const rawJobs = techId ? await listJobs(dayStart, dayEnd, techId) : [];
-    const jobs = sanitizeJobs(rawJobs as any, locals.user);
+    const jobs = techId ? await listJobsSummary(dayStart, dayEnd, techId) : [];
     return { techs, techId, date: dateStr, jobs };
   }
 
@@ -30,7 +28,6 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   const nextDay = new Date(y, m - 1, d, 0, 0, 0, 0); nextDay.setDate(nextDay.getDate() + 1);
   const dayEnd = Math.floor(nextDay.getTime() / 1000);
 
-  const rawJobs = techId ? await listJobs(dayStart, dayEnd, techId) : [];
-  const jobs = sanitizeJobs(rawJobs as any, locals.user);
+  const jobs = techId ? await listJobsSummary(dayStart, dayEnd, techId) : [];
   return { techs, techId, date: dateStr, jobs };
 };

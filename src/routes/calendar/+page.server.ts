@@ -1,6 +1,6 @@
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { findUserById, listActiveUsers, listJobs } from '$lib/server/db';
+import { findUserById, listActiveUsers, listJobsSummary } from '$lib/server/db';
 import { parseWeekOffset } from '$lib/server/weekOffset';
 
 function startOfWeek(d: Date): Date {
@@ -22,7 +22,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     const endDate = new Date(base); endDate.setDate(endDate.getDate() + 7);
     const endTs = Math.floor(endDate.getTime() / 1000);
     const techs = [{ id: locals.user.id, display_name: locals.user.display_name }];
-    const weekJobs = (await listJobs(startTs, endTs, locals.user.id)) as any[];
+    const weekJobs = (await listJobsSummary(startTs, endTs, locals.user.id)) as any[];
     const days: { iso: string; date: Date; techs: { techId: number; techName: string; jobs: typeof weekJobs }[] }[] = [];
     for (let i = 0; i < 7; i++) {
       const d = new Date(base); d.setDate(d.getDate() + i);
@@ -49,7 +49,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   const endDate = new Date(base); endDate.setDate(endDate.getDate() + 7);
   const endTs = Math.floor(endDate.getTime() / 1000);
 
-  const weekJobs = (await listJobs(startTs, endTs)) as any[];
+  const weekJobs = (await listJobsSummary(startTs, endTs)) as any[];
   const activeIds = new Set(activeTechs.map((t) => t.id));
   const extraTechIds = [...new Set(weekJobs.filter((j) => j.status !== 'cancelled').map((j) => j.tech_id as number))].filter((id) => !activeIds.has(id));
   const extraTechs = (
