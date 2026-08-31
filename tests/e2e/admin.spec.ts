@@ -22,6 +22,7 @@ test.describe('admin', () => {
     const username = uniqueUsername('sales');
     const display = `E2E ${username}`;
 
+    await page.getByRole('button', { name: 'New user' }).click();
     await page.locator('#new-username').fill(username);
     await page.locator('#new-password').fill('testpass123');
     await page.locator('#new-display').fill(display);
@@ -48,6 +49,7 @@ test.describe('admin', () => {
     await page.goto('/admin');
 
     const username = uniqueUsername('disable');
+    await page.getByRole('button', { name: 'New user' }).click();
     await page.locator('#new-username').fill(username);
     await page.locator('#new-password').fill('testpass123');
     await page.locator('#new-display').fill(`Z Disable ${username}`);

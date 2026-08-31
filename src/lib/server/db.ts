@@ -87,7 +87,10 @@ function ensureSchemaOnce(): Promise<void> {
 
 function getD1(): D1 | null {
   const explicitDbPath = (privateEnv as any).DB_PATH ?? (process.env as any).DB_PATH;
-  if (explicitDbPath) return null;
+  // adapter-cloudflare runs `vite preview` inside Miniflare, whose platform env
+  // exposes the D1 binding but not the web-server process's DB_PATH.
+  const isMiniflare = (globalThis as any).navigator?.userAgent === 'Miniflare';
+  if (explicitDbPath || isMiniflare) return null;
   if (dev) return null;
   try {
     const ev = getRequestEvent();
