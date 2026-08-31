@@ -1,7 +1,7 @@
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 import { getJob, findUserById, setJobStatus, setJobCompleted } from '$lib/server/db';
-import { isTechForbidden, assertJobLoadAccess } from '$lib/server/jobAccess';
+import { assertJobLoadAccess, canViewJob, canChangeJobStatus } from '$lib/server/jobAccess';
 import { reconcileAndDeliver } from '$lib/server/notifications';
 
 const ALL_STATUSES = ['sent','signed','cancelled'] as const;
@@ -14,9 +14,8 @@ export const load: PageServerLoad = async ({ params, locals }) => {
   assertJobLoadAccess(locals.user, job);
   const tech = await findUserById(job.tech_id);
   const booker = await findUserById(job.booked_by);
-  const canSeePii = locals.user.role === 'admin'
-    || (locals.user.role === 'tech' && locals.user.id === job.tech_id)
-    || (locals.user.role === 'sales' && locals.user.id === job.booked_by);
+  // Single source for PII/edit — preserves current effective behavior (admin never reaches here, tech own, sales own-booked).
+  const canSeePii = canChangeJobStatus(locals.user, job);
   const canEdit = canSeePii;
   return {
     job,
@@ -30,15 +29,11 @@ export const load: PageServerLoad = async ({ params, locals }) => {
 export const actions: Actions = {
   status: async ({ request, params, locals }) => {
     if (!locals.user) return fail(403, { error: 'forbidden' });
-    if (locals.user.role === 'admin') return fail(403, { error: 'forbidden' });
     const id = Number(params.id);
     const job = await getJob(id);
     if (!job) return fail(404, { error: 'not found' });
-    if (isTechForbidden(locals.user, job)) return fail(403, { error: 'forbidden' });
-    const canChange = locals.user.role === 'admin'
-      || (locals.user.role === 'tech' && locals.user.id === job.tech_id)
-      || (locals.user.role === 'sales' && locals.user.id === job.booked_by);
-    if (!canChange) return fail(403, { error: 'forbidden' });
+    if (!canViewJob(locals.user, job)) return fail(403, { error: 'forbidden' });
+    if (!canChangeJobStatus(locals.user, job)) return fail(403, { error: 'forbidden' });
     const data = await request.formData();
     const status = String(data.get('status') || '');
     if (!ALL_STATUSES.includes(status as any)) return fail(400, { error: 'bad status' });
@@ -52,7 +47,7 @@ export const actions: Actions = {
     const id = Number(params.id);
     const job = await getJob(id);
     if (!job) return fail(404, { error: 'not found' });
-    if (isTechForbidden(locals.user, job)) return fail(403, { error: 'forbidden' });
+    if (!canViewJob(locals.user, job)) return fail(403, { error: 'forbidden' });
     const data = await request.formData();
     const completed = String(data.get('completed') || '0') === '1';
     await setJobCompleted(id, completed ? Math.floor(Date.now() / 1000) : null, locals.user.id);
