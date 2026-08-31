@@ -13,7 +13,10 @@ export function haversineKm(aLat: number, aLng: number, bLat: number, bLng: numb
 
 // Straight-line distance underestimates real driving distance; the road factor
 // (default 1.3) nudges it closer to on-the-ground travel.
-export function travelMinutes(distKm: number, speedKmh: number, roadFactor = 1.3): number {
+// Defaults are intentionally not inlined — see lib/geo/travelModel.ts for the
+// single source of TravelModel vs Feasibility.
+import { TRAVEL_MODEL } from './geo/travelModel';
+export function travelMinutes(distKm: number, speedKmh: number = TRAVEL_MODEL.speedKmh, roadFactor: number = TRAVEL_MODEL.roadFactor): number {
   if (!speedKmh || speedKmh <= 0) return 0;
   return Math.max(1, Math.round((distKm * roadFactor) / speedKmh * 60));
 }

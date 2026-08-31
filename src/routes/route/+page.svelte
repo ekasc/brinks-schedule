@@ -6,6 +6,7 @@
   import type { PageData } from './$types';
   import 'leaflet/dist/leaflet.css';
   import { haversineKm, travelMinutes, fmtDist, fmtMin } from '$lib/geo';
+  import { ROUTE_TRAVEL_MODEL, FEASIBILITY } from '$lib/geo/travelModel';
   import { Select, Calendar, Popover, Button, Dialog } from 'bits-ui';
   import { CalendarDate, parseDate, today, getLocalTimeZone } from '@internationalized/date';
   import { swipeSheet } from '$lib/actions/swipeSheet';
@@ -74,8 +75,10 @@
     document.documentElement.style.overflowAnchor = (filterOpen || sheetOpen) ? 'none' : '';
   }
 
-  let marginMin = 15;
-  let speed = 40;
+  // Feasibility margin and travel speed are explicit policy — not silent defaults.
+  // See lib/geo/travelModel.ts for single sources.
+  let marginMin = FEASIBILITY.routeMarginMin;
+  let speed = ROUTE_TRAVEL_MODEL.speedKmh;
 
   const statusColor: Record<string, string> = {
     sent: '#0A84FF',

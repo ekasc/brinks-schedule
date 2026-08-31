@@ -7,6 +7,8 @@ import { getRequestEvent } from '$app/server';
 import { dev } from '$app/environment';
 import { geocode } from './geocode';
 import { BUFFER_MIN } from './availability/policy';
+import { haversineKm as _haversineKm, travelMinutes as _travelMinutes } from '$lib/geo';
+import { TRAVEL_MODEL } from '$lib/geo/travelModel';
 
 // --- PII encryption (works with nodejs_compat on Workers) ---
 import crypto from 'node:crypto';
@@ -789,6 +791,10 @@ export async function getSystemStats(fromTs?: number, toTs?: number){
   const r:any = await d1Get(`SELECT COUNT(*) as total, COALESCE(SUM(CASE WHEN status='signed' THEN 1 ELSE 0 END),0) as signed, COALESCE(SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END),0) as sent, COALESCE(SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END),0) as cancelled, COALESCE(SUM(CASE WHEN completed_at IS NOT NULL THEN 1 ELSE 0 END),0) as completed, COALESCE(SUM(payout_cents),0) as total_cents, COALESCE(SUM(CASE WHEN status='signed' THEN payout_cents ELSE 0 END),0) as earned_cents FROM jobs WHERE ${where}`, ...params);
   r.conversion = r.total?Math.round((r.signed/r.total)*100):0; r.completion = r.signed?Math.round((r.completed/r.signed)*100):0; return r;
 }
-export async function haversineKm(aLat:number,aLng:number,bLat:number,bLng:number): Promise<number>{ const R=6371; const toRad=(d:number)=>d*Math.PI/180; const dLat=toRad(bLat-aLat); const dLng=toRad(bLng-aLng); const lat1=toRad(aLat); const lat2=toRad(bLat); const x=Math.sin(dLat/2)**2 + Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLng/2)**2; return 2*R*Math.asin(Math.sqrt(x)); }
-export async function travelMinutes(aLat:number,aLng:number,bLat:number,bLng:number, speedKmh=45){ return Math.round((await haversineKm(aLat,aLng,bLat,bLng)/speedKmh)*60); }
+export async function haversineKm(aLat:number,aLng:number,bLat:number,bLng:number): Promise<number>{ return _haversineKm(aLat,aLng,bLat,bLng); }
+export async function travelMinutes(aLat:number,aLng:number,bLat:number,bLng:number, speedKmh: number = TRAVEL_MODEL.speedKmh){
+  const dist = await haversineKm(aLat,aLng,bLat,bLng);
+  // Use shared travelMinutes which applies roadFactor from TRAVEL_MODEL
+  return _travelMinutes(dist, speedKmh, TRAVEL_MODEL.roadFactor);
+}
 export async function isTight(aLat:number,aLng:number,bLat:number,bLng:number,gapMin:number){ return (await travelMinutes(aLat,aLng,bLat,bLng))>gapMin; }
