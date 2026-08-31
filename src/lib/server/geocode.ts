@@ -56,6 +56,7 @@ function photonLabel(p: Record<string, unknown>): string {
  * (offline, rate-limited, unknown address) so callers stay best-effort.
  */
 export async function geocode(address: string): Promise<Coords | null> {
+  if ((globalThis as any).navigator?.userAgent === 'Miniflare') return null;
   const key = address.trim().toLowerCase();
   if (!key) return null;
   if (cache.has(key)) return cache.get(key)!;

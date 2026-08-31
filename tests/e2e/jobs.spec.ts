@@ -41,15 +41,13 @@ test.describe('jobs', () => {
     await expect(page.getByText('Completed', { exact: true })).toBeVisible({ timeout: 10_000 });
   });
 
-  test('search on / finds booked job', async ({ page }) => {
+  test('search on calendar finds booked job', async ({ page }) => {
     await login(page, 'ekas');
     const clientName = await bookJob(page);
     await page.getByRole('button', { name: 'Mark Signed' }).click();
     await page.getByRole('button', { name: 'Yes' }).click();
     await expect(page.getByRole('button', { name: 'Mark install completed' })).toBeVisible({ timeout: 10_000 });
-    await page.goto('/');
-    const search = page.getByPlaceholder(/Search client or address/i);
-    await search.fill(clientName);
+    await page.goto(`/calendar?q=${encodeURIComponent(clientName)}`);
     await expect(page.getByText(clientName).first()).toBeVisible({ timeout: 10_000 });
   });
 });

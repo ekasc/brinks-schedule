@@ -39,7 +39,7 @@ export default async function globalSetup() {
   const todayStart = Math.floor(today.getTime() / 1000);
 
   const blockIns = db.prepare('INSERT INTO availability_blocks (tech_id, starts_at, ends_at, note) VALUES (?, ?, ?, ?)');
-  for (let d = 0; d < 14; d++) {
+  for (let d = 1; d <= 14; d++) {
     const dayStart = todayStart + d * 86400;
     blockIns.run(tech1.id, dayStart + 9 * 3600, dayStart + 17 * 3600, 'e2e block');
     blockIns.run(tech2.id, dayStart + 9 * 3600, dayStart + 17 * 3600, 'e2e block');
