@@ -79,6 +79,13 @@ function ensureSchemaOnce(): Promise<void> {
         }
         try { await d1.exec(`ALTER TABLE availability_templates ADD COLUMN kind TEXT NOT NULL DEFAULT 'available' CHECK (kind IN ('available','unavailable'))`); } catch {}
         try { await d1.exec(`ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 1`); } catch {}
+        // Migration: cut over from the old multi-interval + ad-hoc blocked model.
+        // The new Hours UI has only one slot per day and no block-time dialog.
+        // Existing 'unavailable' template rows (recurring breaks) and all
+        // availability_unavailable rows (ad-hoc blocks) would be invisible to
+        // the new UI but still block bookings. Drop them on schema init.
+        try { await d1.exec(`DELETE FROM availability_templates WHERE kind = 'unavailable'`); } catch {}
+        try { await d1.exec(`DELETE FROM availability_unavailable WHERE ends_at > unixepoch()`); } catch {}
       }
     })();
   }
@@ -176,7 +183,7 @@ export interface AvailabilityTemplate { id: number; tech_id: number; dow: number
 export interface AvailabilityUnavailable { id: number; tech_id: number; starts_at: number; ends_at: number; reason: string|null; }
 export interface Job { id: number; tech_id: number; booked_by: number; client_name: string; address: string; street: string|null; city: string|null; province: string|null; postal_code: string|null; lat: number|null; lng: number|null; starts_at: number; ends_at: number; status: 'sent'|'signed'|'cancelled'; completed_at: number|null; notes: string|null; email: string|null; dob: string|null; telus_pin: string|null; id_type: string|null; id_last4: string|null; emergency_name: string|null; emergency_number: string|null; emergency_relation: string|null; verbal_password: string|null; svc_internet: number; svc_internet_detail: string|null; svc_home_phone: number; svc_home_phone_detail: string|null; svc_tv: number; svc_tv_detail: string|null; themes: string|null; security_offered: string|null; phone: string|null; price_cents: number; payout_cents: number; created_at?: number; updated_at?: number; _decryptFailed?: string[]; }
 export interface JobWithTech extends Job { tech_name: string; booker_name: string; }
-export type JobSummary = Pick<Job, 'id'|'tech_id'|'booked_by'|'client_name'|'address'|'lat'|'lng'|'starts_at'|'ends_at'|'status'|'completed_at'|'notes'|'email'|'svc_internet'|'svc_internet_detail'|'svc_home_phone'|'svc_home_phone_detail'|'svc_tv'|'svc_tv_detail'|'themes'|'security_offered'|'price_cents'|'payout_cents'|'created_at'|'updated_at'> & { tech_name: string; booker_name: string; };
+export type JobSummary = Pick<Job, 'id'|'tech_id'|'booked_by'|'client_name'|'address'|'street'|'city'|'province'|'postal_code'|'lat'|'lng'|'starts_at'|'ends_at'|'status'|'completed_at'|'notes'|'email'|'svc_internet'|'svc_internet_detail'|'svc_home_phone'|'svc_home_phone_detail'|'svc_tv'|'svc_tv_detail'|'themes'|'security_offered'|'price_cents'|'payout_cents'|'created_at'|'updated_at'> & { tech_name: string; booker_name: string; };
 
 // users
 export async function createUser(username: string, password: string, role: 'admin'|'sales'|'tech', display_name: string): Promise<number> {
@@ -245,20 +252,65 @@ export async function addTemplate(techId: number, dow: number, startMin: number,
 export async function removeTemplate(id: number, techId: number){ await d1Run(`DELETE FROM availability_templates WHERE id = ? AND tech_id = ?`, id, techId); }
 // Pattern helpers
 export async function setPatternsForTech(techId: number, patterns: {dow:number; start_min:number; end_min:number; kind?: 'available'|'unavailable'; note?:string|null}[]): Promise<void>{
+  // Migration policy: the new model is one-slot-per-day. Old templates may contain
+  // multiple intervals, mixed kind='unavailable' rows (recurring breaks), and
+  // availability_unavailable rows that the UI no longer exposes.
+  // 1. Treat any existing 'unavailable' kind rows as legacy: delete them outright.
+  //    They used to be used for recurring lunch breaks inside the available window.
+  // 2. Coalesce multiple 'available' rows per (tech, dow) to a single (min start, max end) interval.
+  // 3. If the user submits the same coalesced set, do nothing (idempotent) instead
+  //    of delete-and-reinsert (which would lose row IDs and audit).
   const d1 = getD1();
+  const existing = await d1All(`SELECT id, dow, start_min, end_min, kind FROM availability_templates WHERE tech_id = ?`, techId) as Array<{id:number; dow:number; start_min:number; end_min:number; kind:string}>;
+  // Always remove unavailable-kind rows; UI does not model them anymore.
+  const byDowAvailable = new Map<number, {sMin:number; eMin:number}>();
+  for (const r of existing) {
+    if (r.kind === 'unavailable') continue; // dropped
+    const cur = byDowAvailable.get(r.dow);
+    if (!cur) { byDowAvailable.set(r.dow, {sMin: r.start_min, eMin: r.end_min}); continue; }
+    cur.sMin = Math.min(cur.sMin, r.start_min);
+    cur.eMin = Math.max(cur.eMin, r.end_min);
+  }
+  // Build desired set from input (assumed already deduped per dow by caller).
+  const desired = new Map<number, {sMin:number; eMin:number}>();
+  for (const p of patterns) {
+    const cur = desired.get(p.dow);
+    if (!cur) { desired.set(p.dow, {sMin: p.start_min, eMin: p.end_min}); continue; }
+    cur.sMin = Math.min(cur.sMin, p.start_min);
+    cur.eMin = Math.max(cur.eMin, p.end_min);
+  }
+  // Normalize: empty desired => clear all available rows.
+  if (desired.size === 0) {
+    if (byDowAvailable.size > 0) {
+      if (d1) await d1Run(`DELETE FROM availability_templates WHERE tech_id = ? AND kind = 'available'`, techId);
+      else (await getLocal()).prepare(`DELETE FROM availability_templates WHERE tech_id = ? AND kind = 'available'`).run(techId);
+    }
+    return;
+  }
+  // Detect change vs. existing.
+  let changed = byDowAvailable.size !== desired.size;
+  if (!changed) {
+    for (const [dow, d] of desired) {
+      const ex = byDowAvailable.get(dow);
+      if (!ex || ex.sMin !== d.sMin || ex.eMin !== d.eMin) { changed = true; break; }
+    }
+  }
+  if (!changed) return;
   if (d1) {
-    await d1Run(`DELETE FROM availability_templates WHERE tech_id = ?`, techId);
-    if (!patterns.length) return;
-    const stmts = patterns.map(p => d1.prepare(`INSERT INTO availability_templates (tech_id, dow, start_min, end_min, kind, note) VALUES (?, ?, ?, ?, ?, ?)`).bind(techId, p.dow, p.start_min, p.end_min, p.kind ?? 'available', p.note ?? null));
-    await d1.batch(stmts as any);
+    await d1Run(`DELETE FROM availability_templates WHERE tech_id = ? AND kind = 'available'`, techId);
+    const stmts: any[] = [];
+    for (const [dow, d] of desired) {
+      stmts.push(d1.prepare(`INSERT INTO availability_templates (tech_id, dow, start_min, end_min, kind, note) VALUES (?, ?, ?, ?, 'available', NULL)`).bind(techId, dow, d.sMin, d.eMin));
+    }
+    if (stmts.length) await d1.batch(stmts as any);
   } else {
     const db = await getLocal();
-    const tx = db.transaction((rows: typeof patterns)=>{
-      db.prepare(`DELETE FROM availability_templates WHERE tech_id = ?`).run(techId);
-      const ins = db.prepare(`INSERT INTO availability_templates (tech_id, dow, start_min, end_min, kind, note) VALUES (?, ?, ?, ?, ?, ?)`);
-      for (const p of rows) ins.run(techId, p.dow, p.start_min, p.end_min, p.kind ?? 'available', p.note ?? null);
+    const tx = db.transaction((rows: Array<[number, number, number]>)=>{
+      db.prepare(`DELETE FROM availability_templates WHERE tech_id = ? AND kind = 'available'`).run(techId);
+      const ins = db.prepare(`INSERT INTO availability_templates (tech_id, dow, start_min, end_min, kind, note) VALUES (?, ?, ?, ?, 'available', NULL)`);
+      for (const [dow, s, e] of rows) ins.run(techId, dow, s, e);
     });
-    tx(patterns);
+    tx(Array.from(desired).map(([d, v]) => [d, v.sMin, v.eMin] as [number, number, number]));
   }
 }
 export async function setPatternsForDow(techId: number, dow: number, intervals: {start_min:number; end_min:number; kind?: 'available'|'unavailable'; note?:string|null}[]): Promise<void>{
