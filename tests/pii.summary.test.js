@@ -50,7 +50,7 @@ describe('PII safe boundary', () => {
     const tech = await db.createUser(`tech_${Date.now()}_${Math.random()}`, 'pass123', 'tech', 'TechPII');
     const sales = await db.createUser(`sales_${Date.now()}_${Math.random()}`, 'pass123', 'sales', 'SalesPII');
     const day='2030-08-10';
-    const dow = new Date(`${day}T12:00:00`).getDay();
+    const dow = db.getVancouverParts(hourTs(day,12)).dow;
     await db.setPatternsForTech(tech, [{ dow, start_min: 9*60, end_min: 17*60 }]);
     const r = await db.createJob({
       tech_id: tech, booked_by: sales, client_name: 'Private Client', address: '123 Main St',
@@ -79,7 +79,7 @@ describe('PII safe boundary', () => {
     const tech = await db.createUser(`tech2_${Date.now()}_${Math.random()}`, 'pass123', 'tech', 'TechPII2');
     const sales = await db.createUser(`sales2_${Date.now()}_${Math.random()}`, 'pass123', 'sales', 'SalesPII2');
     const day='2030-08-11';
-    const dow2 = new Date(`${day}T12:00:00`).getDay();
+    const dow2 = db.getVancouverParts(hourTs(day,12)).dow;
     await db.setPatternsForTech(tech, [{ dow: dow2, start_min: 9*60, end_min: 17*60 }]);
     await db.createJob({ tech_id: tech, booked_by: sales, client_name:'C1', address:'a', starts_at: hourTs(day,10), ends_at: hourTs(day,11), phone:'604-111-2222', dob:'1991-02-02' });
     const rows = await db.listJobsSummary(hourTs(day,9), hourTs(day,17), tech);

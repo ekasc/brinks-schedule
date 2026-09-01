@@ -124,18 +124,19 @@ describe('job route authorization - cross-tech forbidden (real helper)', () => {
 
 
 async function setHours(techId, startTs, endTs) {
-  const dow = new Date(startTs * 1000).getDay();
-  const sMin = new Date(startTs * 1000).getHours() * 60 + new Date(startTs * 1000).getMinutes();
-  let eMin = new Date(endTs * 1000).getHours() * 60 + new Date(endTs * 1000).getMinutes();
+  const dbmod = await import('../src/lib/server/db');
+  const start = dbmod.getVancouverParts(startTs);
+  const end = dbmod.getVancouverParts(endTs);
+  const dow = start.dow;
+  const sMin = start.hour * 60 + start.minute;
+  let eMin = end.hour * 60 + end.minute;
   if (eMin === 0 && endTs > startTs) eMin = 1440;
-  const dbmod2 = await import('../src/lib/server/db');
-  const existing = await dbmod2.listTemplates(techId);
+  const existing = await dbmod.listTemplates(techId);
   const byDow = new Map();
   for (const r of existing) byDow.set(r.dow, { start_min: r.start_min, end_min: r.end_min });
   const cur = byDow.get(dow);
   if (cur) { cur.start_min = Math.min(cur.start_min, sMin); cur.end_min = Math.max(cur.end_min, eMin); }
   else byDow.set(dow, { start_min: sMin, end_min: eMin });
-  const dbmod = await import('../src/lib/server/db');
   await dbmod.setPatternsForTech(techId, Array.from(byDow.entries()).map(([d,v])=>({dow: d, start_min: v.start_min, end_min: v.end_min})));
 }
 

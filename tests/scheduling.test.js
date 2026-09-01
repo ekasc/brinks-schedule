@@ -33,9 +33,11 @@ async function createSales(name) {
 
 
 async function setHours(techId, startTs, endTs) {
-  const dow = new Date(startTs * 1000).getDay();
-  const sMin = new Date(startTs * 1000).getHours() * 60 + new Date(startTs * 1000).getMinutes();
-  let eMin = new Date(endTs * 1000).getHours() * 60 + new Date(endTs * 1000).getMinutes();
+  const start = db.getVancouverParts(startTs);
+  const end = db.getVancouverParts(endTs);
+  const dow = start.dow;
+  const sMin = start.hour * 60 + start.minute;
+  let eMin = end.hour * 60 + end.minute;
   if (eMin === 0 && endTs > startTs) eMin = 1440;
   // merge with existing patterns to preserve other weekdays
   const existing = await db.listTemplates(techId);
