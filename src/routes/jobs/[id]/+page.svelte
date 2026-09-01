@@ -91,13 +91,26 @@
     const L = (k: string, v: unknown) => lines.push(`${k}: ${v == null || v === '' ? '—' : v}`);
     const blank = () => lines.push('');
     L('Full name', j.client_name);
-    L('Address', j.address);
+    if (j.street || j.city || j.province) {
+      L('Street / Ave', j.street);
+      L('City', j.city);
+      L('Province', j.province);
+      L('Postal code', j.postal_code);
+      L('Full address', j.address);
+    } else {
+      L('Address', j.address);
+      L('Postal code', j.postal_code);
+    }
     L('Phone number', j.phone);
     L('Email', j.email);
     L('Date of Birth', j.dob);
     L('DL last 4', j.id_last4 ? `${j.id_type ? j.id_type + ' ' : ''}••${j.id_last4}` : '');
     blank();
-    L('Telus Pin', j.telus_pin);
+    if (j.telus_pin && String(j.telus_pin).includes(',')) {
+      String(j.telus_pin).split(',').map(s=>s.trim()).filter(Boolean).forEach((p, idx) => L(`Telus PIN ${idx+1}`, p));
+    } else {
+      L('Telus PIN', j.telus_pin);
+    }
     L('Services', services.length ? services.map(s => s.detail ? `${s.label} (${s.detail})` : s.label).join(', ') : '—');
     L('Price', j.price_cents ? '$' + (j.price_cents / 100).toFixed(2) : '—');
     blank();
@@ -184,10 +197,37 @@
       <span class="label">Booked by</span>
       <span class="value ink">{data.booker?.display_name ?? '—'}</span>
     </div>
+    {#if j.street || j.city || j.province}
+    <div class="row-line !p-0 flex flex-col divide-y divide-[var(--line-thin)] overflow-hidden">
+      <div class="px-4 py-3 bg-[var(--row)]">
+        <div class="text-[11px] uppercase tracking-wide text-[var(--dim)]">Address line</div>
+        <div class="text-[15px] font-medium leading-snug text-[var(--ink)]">{j.street ?? j.address ?? '—'}</div>
+      </div>
+      <div class="flex divide-x divide-[var(--line-thin)] overflow-hidden">
+        <div class="flex-1 min-w-0 px-4 py-3 bg-[var(--row)] overflow-hidden">
+          <div class="text-[11px] uppercase tracking-wide text-[var(--dim)]">City</div>
+          <div class="text-[15px] font-medium leading-snug text-[var(--ink)] truncate">{j.city ?? '—'}</div>
+        </div>
+        <div class="w-[84px] shrink px-4 py-3 bg-[var(--row)] text-center overflow-hidden">
+          <div class="text-[11px] uppercase tracking-wide text-[var(--dim)]">Province</div>
+          <div class="text-[15px] font-medium leading-snug text-[var(--ink)] truncate">{j.province ?? '—'}</div>
+        </div>
+        <div class="w-[148px] shrink px-4 py-3 bg-[var(--row)] overflow-hidden">
+          <div class="text-[11px] uppercase tracking-wide text-[var(--dim)]">Postal code</div>
+          <div class="text-[15px] font-medium leading-snug text-[var(--ink)] truncate">{j.postal_code ?? '—'}</div>
+        </div>
+      </div>
+    </div>
+    {:else}
     <div class="row-line">
       <span class="label">Address</span>
       <span class="value ink">{j.address}</span>
     </div>
+    <div class="row-line row-line--compact">
+      <span class="label">Postal code</span>
+      <span class="value ink">{j.postal_code ?? '—'}</span>
+    </div>
+    {/if}
     {#if j.lat != null && j.lng != null}
       <div class="row-line row-line--compact">
         <span class="label">Location</span>

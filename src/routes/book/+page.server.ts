@@ -73,6 +73,7 @@ export const actions: Actions = {
       svc_tv_detail: value.svc_tv ? (value.svc_tv_detail || null) : null,
       themes: value.themes || null, security_offered: value.security_offered || null, notes: value.notes || null,
       phone: value.phone || null, price_cents: Math.round((value.price || 0) * 100),
+      street: value.street || null, city: value.city || null, province: value.province || null, postal_code: value.postal_code || null,
       lat: lat ?? null, lng: lng ?? null
     });
     if ('conflict' in result) return fail(409, { form, error: result.conflict === 'tech_busy' ? 'That tech is already booked at that time (or the slot was just taken).' : 'That time is outside the tech\'s posted availability. Add a block first or pick a different time.' });
