@@ -56,10 +56,12 @@
     value = s.label;
     lat = s.lat;
     lng = s.lng;
-    if (s.postal_code) postalCode = s.postal_code;
-    if ((s as any).street) street = (s as any).street;
-    if ((s as any).city) city = (s as any).city;
-    if ((s as any).province) province = (s as any).province;
+    // Unconditional assignment — Photon returns null when the field is missing,
+    // and conditional writes leak stale state across suggestions.
+    postalCode = s.postal_code ?? null;
+    street = (s as any).street ?? null;
+    city = (s as any).city ?? null;
+    province = (s as any).province ?? null;
     open = false;
     active = -1;
   }

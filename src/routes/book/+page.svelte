@@ -88,6 +88,7 @@
   let calCursor: Date = new Date();
   function setCalCursor(d: Date) { calCursor = d; }
   let calSelectedDay: string | null = null;
+  let lastAutoFollowIso: string | null = null;
   function slotsForCalendarDay(iso:string) {
     return slots.filter(s => localDateKey(s.starts_at) === iso);
   }
@@ -95,18 +96,19 @@
   $: if (slotsByDay.length && calSelectedDay && !slotsByDay.some(([d]) => d === calSelectedDay)) {
     calSelectedDay = slotsByDay[0][0];
   }
-  // Keep calendar view on the month that contains the selected day / first slot
-  $: (() => {
-    const targetIso = calSelectedDay || (slotsByDay.length ? slotsByDay[0][0] : null);
-    if (!targetIso) return;
-    const d = new Date(targetIso + 'T00:00:00');
-    if (isNaN(d.getTime())) return;
-    if (d.getFullYear() !== calCursor.getFullYear() || d.getMonth() !== calCursor.getMonth()) {
-      setCalCursor(new Date(d.getFullYear(), d.getMonth(), 1));
+  // Auto-follow the selected day's month only when the selection itself changes.
+  // Manual Prev/Next does NOT change calSelectedDay, so navigation sticks.
+  $: if (calSelectedDay && calSelectedDay !== lastAutoFollowIso) {
+    const d = new Date(calSelectedDay + 'T00:00:00');
+    if (!isNaN(d.getTime()) && (d.getFullYear() !== calCursor.getFullYear() || d.getMonth() !== calCursor.getMonth())) {
+      calCursor = new Date(d.getFullYear(), d.getMonth(), 1);
     }
-  })();
-  function calPrev(){ setCalCursor(new Date(calCursor.getFullYear(), calCursor.getMonth()-1, 1)); }
-  function calNext(){ setCalCursor(new Date(calCursor.getFullYear(), calCursor.getMonth()+1, 1)); }
+    lastAutoFollowIso = calSelectedDay;
+  } else if (!calSelectedDay) {
+    lastAutoFollowIso = null;
+  }
+  function calPrev(){ calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth()-1, 1); }
+  function calNext(){ calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth()+1, 1); }
   function calDateToIso(year:number, month:number, day:number){
     const m=String(month+1).padStart(2,'0'); const d=String(day).padStart(2,'0'); return `${year}-${m}-${d}`;
   }
@@ -272,7 +274,7 @@
       <span id="sec-customer-addr" class="block scroll-mt-28" aria-hidden="true"></span>
       <div class="field !p-0 !flex bg-[var(--row)]">
         <div class="flex-1 min-w-0 px-3 py-3 flex items-center">
-          <AddressAutocomplete bare bind:value={$bookForm.street} bind:lat={selLat} bind:lng={selLng} bind:postalCode={$bookForm.postal_code} bind:city={$bookForm.city} bind:province={$bookForm.province} bind:street={$bookForm.street} placeholder="Address line *" ariaLabel="Address line (required)" error={($errors as any).street?.[0] ?? ($errors as any).address?.[0]} required />
+          <AddressAutocomplete bare name="street" bind:value={$bookForm.street} bind:lat={selLat} bind:lng={selLng} bind:city={$bookForm.city} bind:province={$bookForm.province} bind:street={$bookForm.street} placeholder="Address line *" ariaLabel="Address line (required)" error={($errors as any).street?.[0] ?? ($errors as any).address?.[0]} required />
         </div>
       </div>
       <div class="field !p-0 !flex divide-x divide-[var(--line-thin)] overflow-hidden">
@@ -291,7 +293,6 @@
       {#if $errors.province}<span class="px-1 pt-1 text-[13px] leading-tight text-[var(--red)]" transition:fly={{ y: -4, duration: 160, easing: cubicOut }}>{$errors.province}</span>{/if}
       {#if $errors.postal_code}<span class="px-1 pt-1 text-[13px] leading-tight text-[var(--red)]" transition:fly={{ y: -4, duration: 160, easing: cubicOut }}>{$errors.postal_code}</span>{/if}
       {#if $errors.address}<span class="px-1 pt-1 text-[13px] leading-tight text-[var(--red)]" transition:fly={{ y: -4, duration: 160, easing: cubicOut }}>{$errors.address}</span>{/if}
-      <input type="hidden" name="address" value={$bookForm.street ? `${$bookForm.street}${$bookForm.city ? ', ' + $bookForm.city : ''}${$bookForm.province ? ', ' + $bookForm.province : ''}${$bookForm.postal_code ? ' ' + $bookForm.postal_code : ''}` : $bookForm.address} />
       <label class="field">
         <input class={inpc} name="email" type="email" bind:value={$bookForm.email} autocomplete="email" placeholder="Email" aria-label="Email" aria-invalid={$errors.email ? "true" : undefined} />
       {#if $errors.email}<span class="px-1 pt-1 text-[13px] leading-tight text-[var(--red)]" transition:fly={{ y: -4, duration: 160, easing: cubicOut }}>{$errors.email}</span>{/if}</label>
