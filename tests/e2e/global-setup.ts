@@ -36,10 +36,10 @@ export default async function globalSetup() {
 
   // Weekly Hours is the sole source of truth. Seed one slot per weekday (Mon-Fri 09:00-17:00)
   // for both techs so /book has slots without relying on the retired availability_blocks.
-  const tmplIns = db.prepare('INSERT INTO availability_templates (tech_id, dow, start_min, end_min, kind) VALUES (?, ?, ?, ?, ?)') ;
+  const tmplIns = db.prepare('INSERT INTO availability_templates (tech_id, dow, start_min, end_min) VALUES (?, ?, ?, ?)') ;
   for (const tech of [tech1, tech2]) {
     for (const dow of [1, 2, 3, 4, 5]) {
-      tmplIns.run(tech.id, dow, 9 * 60, 17 * 60, 'available');
+      tmplIns.run(tech.id, dow, 9 * 60, 17 * 60);
     }
   }
 

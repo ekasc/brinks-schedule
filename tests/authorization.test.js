@@ -122,6 +122,23 @@ describe('job route authorization - cross-tech forbidden (real helper)', () => {
   });
 });
 
+
+async function setHours(techId, startTs, endTs) {
+  const dow = new Date(startTs * 1000).getDay();
+  const sMin = new Date(startTs * 1000).getHours() * 60 + new Date(startTs * 1000).getMinutes();
+  let eMin = new Date(endTs * 1000).getHours() * 60 + new Date(endTs * 1000).getMinutes();
+  if (eMin === 0 && endTs > startTs) eMin = 1440;
+  const dbmod2 = await import('../src/lib/server/db');
+  const existing = await dbmod2.listTemplates(techId);
+  const byDow = new Map();
+  for (const r of existing) byDow.set(r.dow, { start_min: r.start_min, end_min: r.end_min });
+  const cur = byDow.get(dow);
+  if (cur) { cur.start_min = Math.min(cur.start_min, sMin); cur.end_min = Math.max(cur.end_min, eMin); }
+  else byDow.set(dow, { start_min: sMin, end_min: eMin });
+  const dbmod = await import('../src/lib/server/db');
+  await dbmod.setPatternsForTech(techId, Array.from(byDow.entries()).map(([d,v])=>({dow: d, start_min: v.start_min, end_min: v.end_min})));
+}
+
 describe('technician scoping (db)', () => {
   let db, tmpDir, dbPath;
   beforeAll(async () => {
@@ -139,15 +156,15 @@ describe('technician scoping (db)', () => {
     await db.listUsers();
     const { default: Database } = await import('better-sqlite3');
     let sqlite = new Database(dbPath);
-    sqlite.exec("DELETE FROM jobs; DELETE FROM availability_blocks; DELETE FROM users WHERE username LIKE 'tech%';");
+    sqlite.exec("DELETE FROM jobs; DELETE FROM users WHERE username LIKE 'tech%';");
     sqlite.close();
     const techA = await db.createUser(`techA_${Date.now()}`, 'pass123', 'tech', 'Tech A');
     const techB = await db.createUser(`techB_${Date.now()}`, 'pass123', 'tech', 'Tech B');
     const sales = await db.createUser(`sales_${Date.now()}`, 'pass123', 'sales', 'Sales');
     const day = '2030-07-01';
     const s = (h,m=0)=>Math.floor(new Date(`${day}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00`).getTime()/1000);
-    await db.addAvailability(techA, s(9), s(17), null);
-    await db.addAvailability(techB, s(9), s(17), null);
+    await setHours(techA, s(9), s(17));
+    await setHours(techB, s(9), s(17));
     const rA = await db.createJob({ tech_id: techA, booked_by: sales, client_name: 'A Client', address: '1 St', starts_at: s(10), ends_at: s(11) });
     const rB = await db.createJob({ tech_id: techB, booked_by: sales, client_name: 'B Client', address: '2 St', starts_at: s(12), ends_at: s(13) });
     assert.ok('id' in rA && 'id' in rB);

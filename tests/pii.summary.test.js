@@ -28,7 +28,7 @@ beforeEach(async () => {
   await db.listUsers();
   const { default: Database } = await import('better-sqlite3');
   const sqlite = new Database(dbPath);
-  sqlite.exec('DELETE FROM jobs; DELETE FROM job_events; DELETE FROM availability_blocks; DELETE FROM availability_templates;');
+  sqlite.exec('DELETE FROM jobs; DELETE FROM job_events; DELETE FROM availability_templates;');
   sqlite.close();
 });
 

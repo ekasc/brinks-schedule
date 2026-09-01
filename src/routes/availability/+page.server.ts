@@ -40,19 +40,16 @@ export const actions: Actions = {
     let raw = String(data.get('patterns')||'[]');
     let patterns: any[];
     try { patterns = JSON.parse(raw); } catch { return fail(400, { error: 'invalid patterns' }); }
-    // New model: one available slot per enabled weekday. Only 'available' is accepted;
-    // 'unavailable' kind is retired. Empty array means all days off (explicit).
     for (const p of patterns) {
       if (typeof p.dow!=='number' || p.dow<0 || p.dow>6) return fail(400, { error: 'invalid dow' });
       if (typeof p.start_min!=='number' || typeof p.end_min!=='number') return fail(400, { error: 'invalid minutes' });
       if (p.start_min<0 || p.end_min>1440 || p.end_min<=p.start_min) return fail(400, { error: 'invalid time range' });
-      if (p.kind!=null && p.kind!=='available') return fail(400, { error: 'invalid kind: only available is allowed' });
+      if (p.kind!=null) return fail(400, { error: 'invalid kind: only available is allowed' });
     }
-    // One slot per dow - dedupe by dow, last wins.
     const byDow: Record<number, {start:number; end:number}> = {};
     for (const p of patterns) byDow[p.dow] = {start:p.start_min, end:p.end_min};
     const deduped = Object.entries(byDow).map(([dowStr, v]) => ({dow:Number(dowStr), start_min:v.start, end_min:v.end}));
-    await setPatternsForTech(techId, deduped.map(p=>({dow:p.dow, start_min:p.start_min, end_min:p.end_min, kind:'available', note:null})));
+    await setPatternsForTech(techId, deduped);
     return { ok:true };
   }
 };

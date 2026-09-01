@@ -552,7 +552,7 @@
               <span class="text-[11px] font-medium px-2 py-0.5 rounded-full bg-[var(--row2)] text-[var(--dim)] border border-[var(--line-thin)]">{daySlots.length}</span>
             </div>
             <div class="slot-grid !gap-2 !px-4 !pb-4">
-              {#each daySlots as s}<Button.Root type="button" class="slot-btn !min-h-[40px] !px-3.5 !text-[14px] {s.starts_at === startSlotTs ? 'selected' : ''}" onclick={() => { startSlotTs = s.starts_at; calSelectedDay = day; }}>{fmtTime(s.starts_at)}</Button.Root>{/each}
+              {#each daySlots as s}<Button.Root type="button" data-slot-date={localDateKey(s.starts_at)} class="slot-btn !min-h-[40px] !px-3.5 !text-[14px] {s.starts_at === startSlotTs ? 'selected' : ''}" onclick={() => { startSlotTs = s.starts_at; calSelectedDay = day; }}>{fmtTime(s.starts_at)}</Button.Root>{/each}
             </div>
           </div>
         {/each}
@@ -595,7 +595,7 @@
               <span class="text-[13px] text-[var(--dim)]">{fmtDay(calSelectedDay)}</span>
             </div>
             <div class="slot-grid">
-              {#each slotsForCalendarDay(calSelectedDay) as s}<Button.Root type="button" class="slot-btn {s.starts_at === startSlotTs ? 'selected' : ''}" onclick={() => startSlotTs = s.starts_at}>{fmtTime(s.starts_at)}</Button.Root>{/each}
+              {#each slotsForCalendarDay(calSelectedDay) as s}<Button.Root type="button" data-slot-date={localDateKey(s.starts_at)} class="slot-btn {s.starts_at === startSlotTs ? 'selected' : ''}" onclick={() => startSlotTs = s.starts_at}>{fmtTime(s.starts_at)}</Button.Root>{/each}
             </div>
           </div>
         {:else if calSelectedDay}

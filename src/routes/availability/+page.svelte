@@ -34,7 +34,7 @@
   function initFromTemplates(){
     const next: Record<number, DaySlot> = {};
     for (const d of DAYS) next[d.dow] = { on: false, start: '09:00', end: '17:00' };
-    const avail = templates.filter((t:any)=>(t.kind ?? 'available')==='available');
+    const avail = templates;
     // group by dow
     const byDow = new Map<number, any[]>();
     for (const t of avail) {
@@ -66,7 +66,7 @@
       const sm=strToMin(s.start); const em=strToMin(s.end);
       if (!s.start || !s.end || !Number.isFinite(sm) || !Number.isFinite(em) || em<=sm) { saveErr=`Invalid time on ${d.label}`; return; }
       if (em>1440 || sm<0) { saveErr=`Invalid time on ${d.label}`; return; }
-      patterns.push({ dow: d.dow, start_min: sm, end_min: em, kind:'available' });
+      patterns.push({ dow: d.dow, start_min: sm, end_min: em });
     }
     // Allow all-off (empty) to explicitly mark the week as not working.
     // Do not default to Mon-Fri; empty means no availability.

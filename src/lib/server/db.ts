@@ -77,15 +77,7 @@ function ensureSchemaOnce(): Promise<void> {
         for (const col of ['svc_internet_detail TEXT', 'svc_home_phone_detail TEXT', 'svc_tv_detail TEXT', 'postal_code TEXT', 'street TEXT', 'city TEXT', 'province TEXT']) {
           try { await d1.exec(`ALTER TABLE jobs ADD COLUMN ${col}`); } catch {}
         }
-        try { await d1.exec(`ALTER TABLE availability_templates ADD COLUMN kind TEXT NOT NULL DEFAULT 'available' CHECK (kind IN ('available','unavailable'))`); } catch {}
         try { await d1.exec(`ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 1`); } catch {}
-        // Migration: cut over from the old multi-interval + ad-hoc blocked model.
-        // The new Hours UI has only one slot per day and no block-time dialog.
-        // Existing 'unavailable' template rows (recurring breaks) and all
-        // availability_unavailable rows (ad-hoc blocks) would be invisible to
-        // the new UI but still block bookings. Drop them on schema init.
-        try { await d1.exec(`DELETE FROM availability_templates WHERE kind = 'unavailable'`); } catch {}
-        try { await d1.exec(`DELETE FROM availability_unavailable WHERE ends_at > unixepoch()`); } catch {}
       }
     })();
   }
@@ -178,9 +170,7 @@ function getMutationMeta(r: any): { changes: number; lastId: number } {
 
 // re-export types
 export interface User { id: number; username: string; role: 'admin'|'sales'|'tech'; display_name: string; is_active?: number; session_version?: number; last_login?: number|null; password_hash?: string; }
-export interface AvailabilityBlock { id: number; tech_id: number; starts_at: number; ends_at: number; note: string|null; }
-export interface AvailabilityTemplate { id: number; tech_id: number; dow: number; start_min: number; end_min: number; kind: 'available'|'unavailable'; note: string|null; }
-export interface AvailabilityUnavailable { id: number; tech_id: number; starts_at: number; ends_at: number; reason: string|null; }
+export interface AvailabilityTemplate { id: number; tech_id: number; dow: number; start_min: number; end_min: number; note: string|null; }
 export interface Job { id: number; tech_id: number; booked_by: number; client_name: string; address: string; street: string|null; city: string|null; province: string|null; postal_code: string|null; lat: number|null; lng: number|null; starts_at: number; ends_at: number; status: 'sent'|'signed'|'cancelled'; completed_at: number|null; notes: string|null; email: string|null; dob: string|null; telus_pin: string|null; id_type: string|null; id_last4: string|null; emergency_name: string|null; emergency_number: string|null; emergency_relation: string|null; verbal_password: string|null; svc_internet: number; svc_internet_detail: string|null; svc_home_phone: number; svc_home_phone_detail: string|null; svc_tv: number; svc_tv_detail: string|null; themes: string|null; security_offered: string|null; phone: string|null; price_cents: number; payout_cents: number; created_at?: number; updated_at?: number; _decryptFailed?: string[]; }
 export interface JobWithTech extends Job { tech_name: string; booker_name: string; }
 export type JobSummary = Pick<Job, 'id'|'tech_id'|'booked_by'|'client_name'|'address'|'street'|'city'|'province'|'postal_code'|'lat'|'lng'|'starts_at'|'ends_at'|'status'|'completed_at'|'notes'|'email'|'svc_internet'|'svc_internet_detail'|'svc_home_phone'|'svc_home_phone_detail'|'svc_tv'|'svc_tv_detail'|'themes'|'security_offered'|'price_cents'|'payout_cents'|'created_at'|'updated_at'> & { tech_name: string; booker_name: string; };
@@ -216,169 +206,32 @@ export async function recordLoginResult(key:string,success:boolean){
   await d1Run(`INSERT INTO login_rate_limits(key,window_start,failures,blocked_until) VALUES(?,?,1,0) ON CONFLICT(key) DO UPDATE SET failures=CASE WHEN window_start<? THEN 1 ELSE failures+1 END,window_start=CASE WHEN window_start<? THEN ? ELSE window_start END,blocked_until=CASE WHEN (CASE WHEN window_start<? THEN 1 ELSE failures+1 END)>=5 THEN ? ELSE blocked_until END`,key,now,cutoff,cutoff,now,cutoff,now+900);
 }
 
-// availability
-export async function addAvailability(techId: number, startsAt: number, endsAt: number, note: string|null){
-  // Legacy shim: availability_blocks are retired — isJobWithinAvailability and
-  // getAvailableSlots now use only availability_templates (one slot per dow).
-  // Keep the old call-site working by translating the concrete timestamp
-  // interval into a template row (coalesced per dow via setPatternsForTech).
-  const dow = new Date(startsAt * 1000).getDay();
-  const sMin = new Date(startsAt * 1000).getHours() * 60 + new Date(startsAt * 1000).getMinutes();
-  let eMin = new Date(endsAt * 1000).getHours() * 60 + new Date(endsAt * 1000).getMinutes();
-  if (eMin === 0 && endsAt > startsAt) eMin = 1440;
-  const existing = await d1All(`SELECT dow, start_min, end_min FROM availability_templates WHERE tech_id = ? AND kind = 'available'`, techId) as Array<{dow:number; start_min:number; end_min:number}>;
-  const byDow = new Map<number, {sMin:number; eMin:number}>();
-  for (const r of existing) {
-    const cur = byDow.get(r.dow);
-    if (!cur) byDow.set(r.dow, { sMin: r.start_min, eMin: r.end_min });
-    else { cur.sMin = Math.min(cur.sMin, r.start_min); cur.eMin = Math.max(cur.eMin, r.end_min); }
-  }
-  const cur = byDow.get(dow);
-  if (cur) { cur.sMin = Math.min(cur.sMin, sMin); cur.eMin = Math.max(cur.eMin, eMin); }
-  else byDow.set(dow, { sMin, eMin });
-  const patterns = Array.from(byDow.entries()).map(([d, v]) => ({ dow: d, start_min: v.sMin, end_min: v.eMin, kind: 'available' as const }));
-  await setPatternsForTech(techId, patterns as any);
-  return 0;
-}
-export async function listAvailability(techId: number, fromTs: number, toTs: number){ return await d1All(`SELECT * FROM availability_blocks WHERE tech_id = ? AND starts_at < ? AND ends_at > ? ORDER BY starts_at`, techId, toTs, fromTs) as AvailabilityBlock[]; }
-export async function listAvailabilityForTechs(techIds: number[], fromTs: number, toTs: number): Promise<AvailabilityBlock[]>{
-  if (!techIds.length) return [];
-  const ph = techIds.map(()=> '?').join(',');
-  return await d1All(`SELECT * FROM availability_blocks WHERE tech_id IN (${ph}) AND starts_at < ? AND ends_at > ? ORDER BY tech_id, starts_at`, ...techIds, toTs, fromTs) as AvailabilityBlock[];
-}
-export async function listUnavailableForTechs(techIds: number[], fromTs: number, toTs: number): Promise<AvailabilityUnavailable[]>{
-  if (!techIds.length) return [];
-  const ph = techIds.map(()=> '?').join(',');
-  return await d1All(`SELECT * FROM availability_unavailable WHERE tech_id IN (${ph}) AND starts_at < ? AND ends_at > ? ORDER BY tech_id, starts_at`, ...techIds, toTs, fromTs) as AvailabilityUnavailable[];
-}
-export async function removeAvailability(id: number, techId: number){ await d1Run(`DELETE FROM availability_blocks WHERE id = ? AND tech_id = ?`, id, techId); }
-export async function copyAvailabilityWeek(techId: number, fromWeekStartTs: number, toWeekStartTs: number): Promise<number>{
-  const fromEnd = fromWeekStartTs + 7*86400; const blocks = await listAvailability(techId, fromWeekStartTs, fromEnd); if (!blocks.length) return 0;
-  const offset = toWeekStartTs - fromWeekStartTs;
-  const d1 = getD1();
-  if (d1) {
-    const stmts = blocks.map(b => d1.prepare(`INSERT INTO availability_blocks (tech_id, starts_at, ends_at, note) VALUES (?, ?, ?, ?)`).bind(techId, b.starts_at+offset, b.ends_at+offset, b.note));
-    await d1.batch(stmts as any);
-  } else {
-    const db = await getLocal(); const ins = db.prepare(`INSERT INTO availability_blocks (tech_id, starts_at, ends_at, note) VALUES (?, ?, ?, ?)`); const tx = db.transaction((rows: AvailabilityBlock[])=>{ for(const b of rows) ins.run(techId, b.starts_at+offset, b.ends_at+offset, b.note); }); tx(blocks);
-  }
-  return blocks.length;
-}
+// availability — Hours is the sole model: 0 or 1 interval per weekday in availability_templates
 export async function listTemplates(techId: number){ return await d1All(`SELECT * FROM availability_templates WHERE tech_id = ? ORDER BY dow, start_min`, techId) as AvailabilityTemplate[]; }
 export async function listTemplatesForTechs(techIds: number[]): Promise<AvailabilityTemplate[]>{
   if (!techIds.length) return [];
   const ph = techIds.map(()=> '?').join(',');
   return await d1All(`SELECT * FROM availability_templates WHERE tech_id IN (${ph}) ORDER BY tech_id, dow, start_min`, ...techIds) as AvailabilityTemplate[];
 }
-export async function addTemplate(techId: number, dow: number, startMin: number, endMin: number, note: string|null, kind: 'available'|'unavailable'='available'){ const r:any = await d1Run(`INSERT INTO availability_templates (tech_id, dow, start_min, end_min, kind, note) VALUES (?, ?, ?, ?, ?, ?)`, techId, dow, startMin, endMin, kind, note); return Number(r.lastInsertRowid ?? r.meta?.last_row_id ?? 0); }
+export async function addTemplate(techId: number, dow: number, startMin: number, endMin: number, note: string|null=null){ const r:any = await d1Run(`INSERT INTO availability_templates (tech_id, dow, start_min, end_min, note) VALUES (?, ?, ?, ?, ?)`, techId, dow, startMin, endMin, note); return Number(r.lastInsertRowid ?? r.meta?.last_row_id ?? 0); }
 export async function removeTemplate(id: number, techId: number){ await d1Run(`DELETE FROM availability_templates WHERE id = ? AND tech_id = ?`, id, techId); }
-// Pattern helpers
-export async function setPatternsForTech(techId: number, patterns: {dow:number; start_min:number; end_min:number; kind?: 'available'|'unavailable'; note?:string|null}[]): Promise<void>{
-  // Migration policy: the new model is one-slot-per-day. Old templates may contain
-  // multiple intervals, mixed kind='unavailable' rows (recurring breaks), and
-  // availability_unavailable rows that the UI no longer exposes.
-  // 1. Treat any existing 'unavailable' kind rows as legacy: delete them outright.
-  //    They used to be used for recurring lunch breaks inside the available window.
-  // 2. Coalesce multiple 'available' rows per (tech, dow) to a single (min start, max end) interval.
-  // 3. If the user submits the same coalesced set, do nothing (idempotent) instead
-  //    of delete-and-reinsert (which would lose row IDs and audit).
+export async function setPatternsForTech(techId: number, patterns: {dow:number; start_min:number; end_min:number}[]): Promise<void>{
   const d1 = getD1();
-  const existing = await d1All(`SELECT id, dow, start_min, end_min, kind FROM availability_templates WHERE tech_id = ?`, techId) as Array<{id:number; dow:number; start_min:number; end_min:number; kind:string}>;
-  // Always remove unavailable-kind rows; UI does not model them anymore.
-  const byDowAvailable = new Map<number, {sMin:number; eMin:number; count:number}>();
-  for (const r of existing) {
-    if (r.kind === 'unavailable') continue; // dropped
-    const cur = byDowAvailable.get(r.dow);
-    if (!cur) { byDowAvailable.set(r.dow, {sMin: r.start_min, eMin: r.end_min, count: 1}); continue; }
-    cur.sMin = Math.min(cur.sMin, r.start_min);
-    cur.eMin = Math.max(cur.eMin, r.end_min);
-    cur.count++;
-  }
-  // Build desired set from input (assumed already deduped per dow by caller).
-  const desired = new Map<number, {sMin:number; eMin:number}>();
-  for (const p of patterns) {
-    const cur = desired.get(p.dow);
-    if (!cur) { desired.set(p.dow, {sMin: p.start_min, eMin: p.end_min}); continue; }
-    cur.sMin = Math.min(cur.sMin, p.start_min);
-    cur.eMin = Math.max(cur.eMin, p.end_min);
-  }
-  // Normalize: empty desired => clear all available rows.
-  if (desired.size === 0) {
-    if (byDowAvailable.size > 0) {
-      if (d1) await d1Run(`DELETE FROM availability_templates WHERE tech_id = ? AND kind = 'available'`, techId);
-      else (await getLocal()).prepare(`DELETE FROM availability_templates WHERE tech_id = ? AND kind = 'available'`).run(techId);
-    }
-    return;
-  }
-  // Detect change vs. existing. Also normalize when a dow has multiple rows even if
-  // coalesced min/max matches desired single row - we must collapse to one row.
-  let changed = byDowAvailable.size !== desired.size;
-  if (!changed) {
-    for (const [dow, d] of desired) {
-      const ex = byDowAvailable.get(dow);
-      if (!ex || ex.sMin !== d.sMin || ex.eMin !== d.eMin || ex.count !== 1) { changed = true; break; }
-    }
-  }
-  // Also check if any existing dow has count !=1 (legacy multi-row) even if desired is empty (all-off).
-  if (!changed && desired.size === 0) {
-    for (const [, v] of byDowAvailable) if (v.count !== 1) { changed = true; break; }
-  }
-  if (!changed) return;
   if (d1) {
-    await d1Run(`DELETE FROM availability_templates WHERE tech_id = ? AND kind = 'available'`, techId);
+    await d1Run(`DELETE FROM availability_templates WHERE tech_id = ?`, techId);
+    if (!patterns.length) return;
     const stmts: any[] = [];
-    for (const [dow, d] of desired) {
-      stmts.push(d1.prepare(`INSERT INTO availability_templates (tech_id, dow, start_min, end_min, kind, note) VALUES (?, ?, ?, ?, 'available', NULL)`).bind(techId, dow, d.sMin, d.eMin));
-    }
-    if (stmts.length) await d1.batch(stmts as any);
-  } else {
-    const db = await getLocal();
-    const tx = db.transaction((rows: Array<[number, number, number]>)=>{
-      db.prepare(`DELETE FROM availability_templates WHERE tech_id = ? AND kind = 'available'`).run(techId);
-      const ins = db.prepare(`INSERT INTO availability_templates (tech_id, dow, start_min, end_min, kind, note) VALUES (?, ?, ?, ?, 'available', NULL)`);
-      for (const [dow, s, e] of rows) ins.run(techId, dow, s, e);
-    });
-    tx(Array.from(desired).map(([d, v]) => [d, v.sMin, v.eMin] as [number, number, number]));
-  }
-}
-export async function setPatternsForDow(techId: number, dow: number, intervals: {start_min:number; end_min:number; kind?: 'available'|'unavailable'; note?:string|null}[]): Promise<void>{
-  const d1 = getD1();
-  if (d1) {
-    await d1Run(`DELETE FROM availability_templates WHERE tech_id = ? AND dow = ?`, techId, dow);
-    if (!intervals.length) return;
-    const stmts = intervals.map(p => d1.prepare(`INSERT INTO availability_templates (tech_id, dow, start_min, end_min, kind, note) VALUES (?, ?, ?, ?, ?, ?)`).bind(techId, dow, p.start_min, p.end_min, p.kind ?? 'available', p.note ?? null));
+    for (const p of patterns) stmts.push(d1.prepare(`INSERT INTO availability_templates (tech_id, dow, start_min, end_min, note) VALUES (?, ?, ?, ?, NULL)`).bind(techId, p.dow, p.start_min, p.end_min));
     await d1.batch(stmts as any);
   } else {
     const db = await getLocal();
-    const tx = db.transaction((rows: typeof intervals)=>{
-      db.prepare(`DELETE FROM availability_templates WHERE tech_id = ? AND dow = ?`).run(techId, dow);
-      const ins = db.prepare(`INSERT INTO availability_templates (tech_id, dow, start_min, end_min, kind, note) VALUES (?, ?, ?, ?, ?, ?)`);
-      for (const p of rows) ins.run(techId, dow, p.start_min, p.end_min, p.kind ?? 'available', p.note ?? null);
+    const tx = db.transaction((rows: typeof patterns)=>{
+      db.prepare(`DELETE FROM availability_templates WHERE tech_id = ?`).run(techId);
+      const ins = db.prepare(`INSERT INTO availability_templates (tech_id, dow, start_min, end_min, note) VALUES (?, ?, ?, ?, NULL)`);
+      for (const p of rows) ins.run(techId, p.dow, p.start_min, p.end_min);
     });
-    tx(intervals);
+    tx(patterns);
   }
-}
-// Unavailable / blocked hours
-export async function addUnavailable(techId: number, startsAt: number, endsAt: number, reason: string|null){ const r:any = await d1Run(`INSERT INTO availability_unavailable (tech_id, starts_at, ends_at, reason) VALUES (?, ?, ?, ?)`, techId, startsAt, endsAt, reason); return Number(r.lastInsertRowid ?? r.meta?.last_row_id ?? 0); }
-export async function listUnavailable(techId: number, fromTs: number, toTs: number){ return await d1All(`SELECT * FROM availability_unavailable WHERE tech_id = ? AND starts_at < ? AND ends_at > ? ORDER BY starts_at`, techId, toTs, fromTs) as AvailabilityUnavailable[]; }
-export async function listAllUnavailable(techId: number){ return await d1All(`SELECT * FROM availability_unavailable WHERE tech_id = ? ORDER BY starts_at`, techId) as AvailabilityUnavailable[]; }
-export async function listAllUnavailableForTechs(techIds: number[]): Promise<AvailabilityUnavailable[]>{
-  if (!techIds.length) return [];
-  const ph = techIds.map(()=> '?').join(',');
-  return await d1All(`SELECT * FROM availability_unavailable WHERE tech_id IN (${ph}) ORDER BY tech_id, starts_at`, ...techIds) as AvailabilityUnavailable[];
-}
-export async function removeUnavailable(id: number, techId: number){ await d1Run(`DELETE FROM availability_unavailable WHERE id = ? AND tech_id = ?`, id, techId); }
-export async function applyTemplates(techId: number, weekStartTs: number): Promise<number>{
-  const templates = (await listTemplates(techId)).filter((t:any)=>(t.kind ?? 'available')==='available'); if (!templates.length) return 0;
-  let count=0;
-  for (const t of templates){
-    const dayTs = weekStartTs + t.dow*86400; const d = new Date(dayTs*1000); d.setHours(0,0,0,0); const base = Math.floor(d.getTime()/1000);
-    const s = base + t.start_min*60; const e = base + t.end_min*60; if (e<=s) continue;
-    const overlap = await d1Get(`SELECT id FROM availability_blocks WHERE tech_id = ? AND starts_at < ? AND ends_at > ? LIMIT 1`, techId, e, s);
-    if (overlap) continue;
-    await d1Run(`INSERT INTO availability_blocks (tech_id, starts_at, ends_at, note) VALUES (?, ?, ?, ?)`, techId, s, e, t.note); count++;
-  }
-  return count;
 }
 
 // jobs
@@ -400,8 +253,7 @@ export async function isJobWithinAvailability(techId: number, startsAt: number, 
   const eMin = minutesOfDay(endsAt);
   const eMinAdj = endsAt > startsAt && eMin===0 && new Date(endsAt*1000).getHours()===0 && new Date(endsAt*1000).getMinutes()===0 ? 1440 : eMin;
   const templates = await listTemplates(techId);
-  // Hours (availability_templates, kind='available') is the sole source of truth.
-  // Legacy availability_blocks and unavailable-kind rows are retired.
+  // Hours (availability_templates) is the sole source of truth.
   for (const t of templates) {
     if (t.dow !== dow) continue;
     if (t.start_min <= sMin && eMinAdj <= t.end_min) return true;
@@ -518,7 +370,7 @@ export async function searchJobs(q: string, fromTs?: number, toTs?: number, tech
   return (rows as any[]).map(decryptJobRow);
 }
 export async function __setJobStatusConditional(id: number, status: string, expectedStatus: string): Promise<number> {
-  // Hours (availability_templates kind='available') is the sole source of truth.
+  // Hours (availability_templates) is the sole source of truth.
   const avail = availabilitySqlExists('jobs.tech_id', 'jobs.starts_at', 'jobs.ends_at');
   const r:any = await d1Run(
     `UPDATE jobs SET status = ?, updated_at = unixepoch() WHERE id = ? AND status = ? AND ${avail} AND NOT EXISTS (SELECT 1 FROM jobs AS other WHERE other.tech_id = jobs.tech_id AND other.id != jobs.id AND other.status != 'cancelled' AND other.starts_at < jobs.ends_at + ${BUFFER_SEC} AND other.ends_at > jobs.starts_at - ${BUFFER_SEC})`,
@@ -828,19 +680,10 @@ export async function getTeamStats(fromTs?: number, toTs?: number){
     const rows:any[] = await d1All(`SELECT u.id as uid, COUNT(j.id) as total, COALESCE(SUM(CASE WHEN j.status='signed' THEN 1 ELSE 0 END),0) as signed, COALESCE(SUM(CASE WHEN j.status='sent' THEN 1 ELSE 0 END),0) as sent, COALESCE(SUM(CASE WHEN j.status='cancelled' THEN 1 ELSE 0 END),0) as cancelled, COALESCE(SUM(CASE WHEN j.completed_at IS NOT NULL THEN 1 ELSE 0 END),0) as completed, COALESCE(SUM(j.payout_cents),0) as total_cents, COALESCE(SUM(CASE WHEN j.status='signed' THEN j.payout_cents ELSE 0 END),0) as earned_cents FROM users u LEFT JOIN jobs j ON (j.tech_id=u.id OR j.booked_by=u.id)${timeFilter.replace('starts_at','j.starts_at')} WHERE u.id IN (${ph}) GROUP BY u.id`, ...timeParams, ...adminIds);
     for (const r of rows) agg.set(Number(r.uid), { total:Number(r.total), signed:Number(r.signed), sent:Number(r.sent), cancelled:Number(r.cancelled), completed:Number(r.completed), total_cents:Number(r.total_cents), earned_cents:Number(r.earned_cents) });
   }
-  let blocksByTech: Record<number, number> = {};
-  const allTechIds = [...techIds, ...adminIds];
-  if (allTechIds.length){
-    const ph = allTechIds.map(()=> '?').join(',');
-    let blockWhere = `tech_id IN (${ph})`; const blockParams:any[]=[...allTechIds];
-    if (fromTs!=null && toTs!=null){ blockWhere+= ' AND starts_at >= ? AND starts_at < ?'; blockParams.push(fromTs,toTs); }
-    const blockRows:any[] = await d1All(`SELECT tech_id, COUNT(*) as c FROM availability_blocks WHERE ${blockWhere} GROUP BY tech_id`, ...blockParams);
-    for (const r of blockRows) blocksByTech[Number(r.tech_id)] = Number(r.c);
-  }
   const out:any[]=[];
   for(const u of users){
     const row = agg.get(u.id) ?? { total:0, signed:0, sent:0, cancelled:0, completed:0, total_cents:0, earned_cents:0 };
-    const blocks = (u.role==='tech' || u.role==='admin') ? (blocksByTech[u.id] ?? 0) : 0;
+    const blocks = 0;
     const conversion = row.total?Math.round((row.signed/row.total)*100):0;
     const completion = row.signed?Math.round((row.completed/row.signed)*100):0;
     out.push({ id:u.id, display_name:u.display_name, role:u.role, ...row, blocks, conversion, completion });

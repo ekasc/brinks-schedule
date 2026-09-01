@@ -20,6 +20,22 @@ afterAll(() => {
   try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
 });
 
+
+async function setHours(techId, startTs, endTs) {
+  const dow = new Date(startTs * 1000).getDay();
+  const sMin = new Date(startTs * 1000).getHours() * 60 + new Date(startTs * 1000).getMinutes();
+  let eMin = new Date(endTs * 1000).getHours() * 60 + new Date(endTs * 1000).getMinutes();
+  if (eMin === 0 && endTs > startTs) eMin = 1440;
+  // merge with existing patterns to preserve other weekdays
+  const existing = await db.listTemplates(techId);
+  const byDow = new Map();
+  for (const r of existing) byDow.set(r.dow, { start_min: r.start_min, end_min: r.end_min });
+  const cur = byDow.get(dow);
+  if (cur) { cur.start_min = Math.min(cur.start_min, sMin); cur.end_min = Math.max(cur.end_min, eMin); }
+  else byDow.set(dow, { start_min: sMin, end_min: eMin });
+  await db.setPatternsForTech(techId, Array.from(byDow.entries()).map(([d,v])=>({dow: d, start_min: v.start_min, end_min: v.end_min})));
+}
+
 function hourTs(dateStr, hour, min=0){
   return Math.floor(new Date(`${dateStr}T${String(hour).padStart(2,'0')}:${String(min).padStart(2,'0')}:00`).getTime()/1000);
 }
@@ -28,7 +44,7 @@ beforeEach(async ()=>{
   await db.listUsers();
   const { default: Database } = await import('better-sqlite3');
   const sqlite = new Database(dbPath);
-  sqlite.exec('DELETE FROM jobs; DELETE FROM job_events; DELETE FROM availability_blocks; DELETE FROM availability_templates; DELETE FROM pii_access_log;');
+  sqlite.exec('DELETE FROM jobs; DELETE FROM job_events; DELETE FROM availability_templates; DELETE FROM pii_access_log;');
   sqlite.close();
 });
 
@@ -37,7 +53,7 @@ describe('atomic double-booking race', ()=>{
     const tech = await db.createUser(`tech_${Date.now()}_${Math.random().toString(36).slice(2)}`, 'pass123','tech','TechRace');
     const sales = await db.createUser(`sales_${Date.now()}_${Math.random().toString(36).slice(2)}`, 'pass123','sales','SalesRace');
     const day='2030-07-01';
-    await db.addAvailability(tech, hourTs(day,9), hourTs(day,17), null);
+    await setHours(tech, hourTs(day,9), hourTs(day,17));
     const s=hourTs(day,10), e=hourTs(day,11);
     const p1 = db.createJob({ tech_id: tech, booked_by: sales, client_name:'A', address:'1 St', starts_at:s, ends_at:e });
     const p2 = db.createJob({ tech_id: tech, booked_by: sales, client_name:'B', address:'2 St', starts_at:s, ends_at:e });
@@ -59,7 +75,7 @@ describe('atomic double-booking race', ()=>{
     const tech = await db.createUser(`tech_${Date.now()}_${Math.random().toString(36).slice(2)}`, 'pass123','tech','TechUpd');
     const sales = await db.createUser(`sales_${Date.now()}_${Math.random().toString(36).slice(2)}`, 'pass123','sales','SalesUpd');
     const day='2030-07-02';
-    await db.addAvailability(tech, hourTs(day,9), hourTs(day,17), null);
+    await setHours(tech, hourTs(day,9), hourTs(day,17));
     const s1=hourTs(day,10), e1=hourTs(day,11);
     const s2=hourTs(day,11,30), e2=hourTs(day,12,30);
     const r1=await db.createJob({ tech_id: tech, booked_by: sales, client_name:'C', address:'1 St', starts_at:s1, ends_at:e1 });
@@ -84,7 +100,7 @@ describe('atomic double-booking race', ()=>{
     const tech = await db.createUser(`tech_${Date.now()}_${Math.random().toString(36).slice(2)}`, 'pass123','tech','TechStat');
     const sales = await db.createUser(`sales_${Date.now()}_${Math.random().toString(36).slice(2)}`, 'pass123','sales','SalesStat');
     const day='2030-07-03';
-    await db.addAvailability(tech, hourTs(day,9), hourTs(day,17), null);
+    await setHours(tech, hourTs(day,9), hourTs(day,17));
     const s=hourTs(day,10), e=hourTs(day,11);
     const r1=await db.createJob({ tech_id: tech, booked_by: sales, client_name:'E', address:'1 St', starts_at:s, ends_at:e });
     assert.ok('id' in r1);

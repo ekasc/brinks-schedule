@@ -13,40 +13,18 @@ CREATE TABLE IF NOT EXISTS users (
   created_at INTEGER NOT NULL DEFAULT (unixepoch())
 );
 
-CREATE TABLE IF NOT EXISTS availability_blocks (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  tech_id INTEGER NOT NULL,
-  starts_at INTEGER NOT NULL,
-  ends_at INTEGER NOT NULL,
-  note TEXT,
-  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  FOREIGN KEY (tech_id) REFERENCES users(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_avail_tech_starts ON availability_blocks(tech_id, starts_at);
-
 CREATE TABLE IF NOT EXISTS availability_templates (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   tech_id INTEGER NOT NULL,
   dow INTEGER NOT NULL CHECK (dow >= 0 AND dow <= 6),
   start_min INTEGER NOT NULL,
   end_min INTEGER NOT NULL,
-  kind TEXT NOT NULL DEFAULT 'available' CHECK (kind IN ('available','unavailable')),
   note TEXT,
   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
   FOREIGN KEY (tech_id) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_templates_tech_dow ON availability_templates(tech_id, dow);
-
-CREATE TABLE IF NOT EXISTS availability_unavailable (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  tech_id INTEGER NOT NULL,
-  starts_at INTEGER NOT NULL,
-  ends_at INTEGER NOT NULL,
-  reason TEXT,
-  created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-  FOREIGN KEY (tech_id) REFERENCES users(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_unavail_tech_starts ON availability_unavailable(tech_id, starts_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_templates_tech_dow_unique ON availability_templates(tech_id, dow);
 
 CREATE TABLE IF NOT EXISTS jobs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
