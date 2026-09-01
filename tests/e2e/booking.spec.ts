@@ -50,6 +50,13 @@ test.describe('booking', () => {
     await page.waitForURL(/\/jobs\/\d+/, { timeout: 15_000 });
     await expect(page).toHaveURL(/\/jobs\/\d+/);
     await expect(page.getByText(clientName).first()).toBeVisible();
+    // Split-address fields persist and render on job detail. Use exact match
+    // because the composed address contains 'Vancouver' as a substring too.
+    await expect(page.getByText('Address line', { exact: true })).toBeVisible();
+    await expect(page.getByText('City', { exact: true })).toBeVisible();
+    await expect(page.getByText('Province', { exact: true })).toBeVisible();
+    await expect(page.getByText('Postal code', { exact: true })).toBeVisible();
+    await expect(page.getByText('V6A 1A1', { exact: true })).toBeVisible();
   });
 
   test('booking requires client name and address', async ({ page }) => {
@@ -84,5 +91,17 @@ test.describe('booking', () => {
     await page.waitForURL(/\/jobs\/\d+/);
     await page.goto(`/calendar?q=${encodeURIComponent(clientName2)}`);
     await expect(page.getByText(clientName2).first()).toBeVisible({ timeout: 10_000 });
+    // Verify all four split-address fields render on the job detail page.
+    // Capture the job URL from the calendar link and navigate there directly,
+    // because the calendar list view doesn't show the split-address block.
+    const detailHref = await page.getByRole('link', { name: new RegExp(clientName2) }).first().getAttribute('href');
+    if (detailHref) {
+      await page.goto(detailHref);
+      await expect(page.getByText('Address line', { exact: true })).toBeVisible();
+      await expect(page.getByText('City', { exact: true })).toBeVisible();
+      await expect(page.getByText('Province', { exact: true })).toBeVisible();
+      await expect(page.getByText('Postal code', { exact: true })).toBeVisible();
+      await expect(page.getByText('V6A 1A1', { exact: true })).toBeVisible();
+    }
   });
 });
