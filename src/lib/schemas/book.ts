@@ -1,7 +1,12 @@
 import { z } from 'zod';
 
 const optionalText = z.string().trim().optional();
-const validDate = z.string().min(1, 'Choose a time from the calendar — tap a day, then a slot.').refine((value) => !Number.isNaN(new Date(value).getTime()), 'That date isn’t valid — pick a slot from the calendar.');
+function parseTimestamp(value: string): number | null {
+  const s = String(value).trim();
+  if (/^\d{9,10}$/.test(s)) { const n = Number(s); return Number.isFinite(n) ? n : null; }
+  const t = new Date(s).getTime(); return Number.isNaN(t) ? null : Math.floor(t/1000);
+}
+const validDate = z.string().min(1, 'Choose a time from the calendar — tap a day, then a slot.').refine((value) => parseTimestamp(value) !== null, 'That date isn’t valid — pick a slot from the calendar.');
 
 export const bookJobSchema = z.object({
   client_name: z.string().trim().min(2, 'Full name needs at least 2 characters.').min(1, 'Full name is required.'),
@@ -36,7 +41,11 @@ export const bookJobSchema = z.object({
   price: z.preprocess((v) => (v === '' || v == null ? undefined : Number(v)), z.number().min(0).optional()),
   lat: z.preprocess((v) => (v === '' || v == null ? undefined : Number(v)), z.number().optional()),
   lng: z.preprocess((v) => (v === '' || v == null ? undefined : Number(v)), z.number().optional())
-}).refine((value) => new Date(value.ends_at).getTime() > new Date(value.starts_at).getTime(), {
+}).refine((value) => {
+  const a = parseTimestamp(value.starts_at);
+  const b = parseTimestamp(value.ends_at);
+  return a != null && b != null && b > a;
+}, {
   path: ['ends_at'], message: 'End time needs to be after the start — pick a later slot.'
 });
 

@@ -21,7 +21,20 @@ afterAll(() => {
 });
 
 function hourTs(dateStr, hour, min=0){
-  return Math.floor(new Date(`${dateStr}T${String(hour).padStart(2,'0')}:${String(min).padStart(2,'0')}:00`).getTime()/1000);
+  const [y,m,d]=dateStr.split('-').map(Number);
+  let guess = Date.UTC(y,m-1,d,hour,min,0)/1000;
+  for(let i=0;i<3;i++){
+    const fmt = new Intl.DateTimeFormat('en-US',{timeZone:'America/Vancouver',year:'numeric',month:'numeric',day:'numeric',hour:'numeric',minute:'numeric',second:'numeric',hour12:false});
+    const parts = fmt.formatToParts(new Date(guess*1000));
+    const mp=new Map(parts.map(p=>[p.type,p.value]));
+    const py=Number(mp.get('year')), pm=Number(mp.get('month')), pd=Number(mp.get('day')), ph=Number(mp.get('hour')), pmi=Number(mp.get('minute')), ps=Number(mp.get('second'));
+    const guessWall=Date.UTC(py,pm-1,pd,ph,pmi,ps)/1000;
+    const desiredWall=Date.UTC(y,m-1,d,hour,min,0)/1000;
+    const delta=desiredWall-guessWall;
+    if(delta===0) break;
+    guess+=delta;
+  }
+  return Math.floor(guess);
 }
 
 beforeEach(async () => {

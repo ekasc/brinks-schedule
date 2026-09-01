@@ -41,8 +41,14 @@ export const actions: Actions = {
     const form = await superValidate(request, zod4(bookJobSchema as any));
     if (!form.valid) return fail(400, { form });
     const value = form.data as any;
-    const startsAt = Math.floor(new Date(value.starts_at).getTime() / 1000);
-    const endsAt = Math.floor(new Date(value.ends_at).getTime() / 1000);
+    const parseTs = (v: string): number | null => {
+      const s = String(v).trim();
+      if (/^\d{9,10}$/.test(s)) { const n = Number(s); return Number.isFinite(n) ? n : null; }
+      const t = new Date(s).getTime(); return Number.isNaN(t) ? null : Math.floor(t/1000);
+    };
+    const startsAt = parseTs(value.starts_at) ?? 0;
+    const endsAt = parseTs(value.ends_at) ?? 0;
+    if (!startsAt || !endsAt) return fail(400, { form, error: 'Invalid time slot.' });
     // Reproduce the slot using the actual selected duration; getAvailableSlots defaults to
     // 90-min slots, so a 60/120-min selection would never match and be wrongly rejected.
     const durationMin = Math.max(1, Math.round((endsAt - startsAt) / 60));

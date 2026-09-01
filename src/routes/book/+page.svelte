@@ -67,9 +67,10 @@
 
   $: slots = (data.slotsByTechByDuration?.[techId]?.[durationMin] ?? data.slotsByTech[techId] ?? []);
   function localDateKey(ts:number) {
-    const d = new Date(ts * 1000);
-    const p = (n:number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+    const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Vancouver', year:'numeric', month:'2-digit', day:'2-digit' });
+    const parts = fmt.formatToParts(new Date(ts*1000));
+    const m=new Map(parts.map(p=>[p.type,p.value] as const));
+    return `${m.get('year')}-${m.get('month')}-${m.get('day')}`;
   }
   $: slotsByDay = (() => {
     const map = new Map<string, { starts_at: number; ends_at: number }[]>();
@@ -133,19 +134,8 @@
   function fmtDayFull(slot: { starts_at: number }) { const d=new Date(slot.starts_at*1000); return d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}); }
   function isToday(iso: string) { return iso === todayIso; }
   function fmtTime(ts: number) { return new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); }
-  // Format a unix timestamp as a datetime-local string using LOCAL components so the
-  // value round-trips exactly. Using toISOString() would emit a UTC string with no
-  // timezone suffix, which the browser would parse back as LOCAL time and shift the
-  // stored booking by the user's UTC offset.
-  function toLocalInput(ts: number): string {
-    const d = new Date(ts * 1000);
-    const p = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
-  }
 
   $: selectedSlot = slots.find(s => s.starts_at === startSlotTs);
-  $: startsAtLocal = selectedSlot ? toLocalInput(selectedSlot.starts_at) : '';
-  $: endsAtLocal = selectedSlot ? toLocalInput(selectedSlot.ends_at) : '';
   $: canSubmit = !!selectedSlot && !!clientName?.trim() && !!$bookForm.street?.trim() && !!$bookForm.city?.trim() && !!$bookForm.province?.trim() && !!$bookForm.postal_code?.trim() && !busy;
 
   const idTypes: { value: 'dl'|'passport'|'bcid'|'other'; label: string }[] = [
@@ -632,8 +622,8 @@
     </div>
   </div>
 
-  <input type="hidden" name="starts_at" value={startsAtLocal} />
-  <input type="hidden" name="ends_at" value={endsAtLocal} />
+  <input type="hidden" name="starts_at" value={selectedSlot?.starts_at ?? ''} />
+  <input type="hidden" name="ends_at" value={selectedSlot?.ends_at ?? ''} />
 
   <div id="sec-book" class="form-section scroll-mt-24">
     <div class="flex items-center gap-3">

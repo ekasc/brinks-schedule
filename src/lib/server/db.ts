@@ -8,6 +8,7 @@ import { dev } from '$app/environment';
 import { geocode } from './geocode';
 import { BUFFER_MIN, BUFFER_SEC } from './availability/policy';
 import { haversineKm as _haversineKm, travelMinutes as _travelMinutes } from '$lib/geo';
+import { TRAVEL_MODEL } from '$lib/geo/travelModel';
 
 export const BUSINESS_TIME_ZONE = 'America/Vancouver';
 
@@ -36,7 +37,6 @@ export function vancouverWallToEpoch(year:number, month:number, day:number, hour
 export function vancouverMidnightEpoch(year:number, month:number, day:number): number { return vancouverWallToEpoch(year, month, day, 0,0,0); }
 
 export function ceilToStep(ts:number, stepSec:number): number { return Math.ceil(ts/stepSec)*stepSec; }
-import { TRAVEL_MODEL } from '$lib/geo/travelModel';
 
 // --- PII encryption (works with nodejs_compat on Workers) ---
 import crypto from 'node:crypto';
@@ -372,7 +372,14 @@ export async function updateJob(id: number, patch: any, actorId?: number): Promi
   fields.push(`updated_at = unixepoch()`);
   const allParams = Object.values(vals);
   if (isSchedulingChange) {
-    const sql = `UPDATE jobs SET ${fields.join(', ')} WHERE id = ? AND NOT EXISTS (SELECT 1 FROM jobs WHERE tech_id = ? AND id != ? AND status != 'cancelled' AND starts_at < ? AND ends_at > ?)`;
+    const dow2 = getVancouverParts(nextStart).dow;
+    const sMin2 = minutesOfDay(nextStart);
+    const eParts2 = getVancouverParts(nextEnd);
+    let eMin2 = minutesOfDay(nextEnd);
+    if (nextEnd > nextStart && eMin2===0 && eParts2.hour===0 && eParts2.minute===0) eMin2 = 1440;
+    const sameDateOk = sameLocalDate(nextStart, nextEnd) ? '1' : '0';
+    const availExists2 = availabilitySqlExistsForConstants(nextTech, dow2, sMin2, eMin2);
+    const sql = `UPDATE jobs SET ${fields.join(', ')} WHERE id = ? AND ${sameDateOk}=1 AND ${availExists2} AND NOT EXISTS (SELECT 1 FROM jobs WHERE tech_id = ? AND id != ? AND status != 'cancelled' AND starts_at < ? AND ends_at > ?)`;
     const r:any = await d1Run(sql, ...allParams, id, nextTech, id, nextEnd + BUFFER_SEC, nextStart - BUFFER_SEC);
     const { changes } = getMutationMeta(r);
     if (changes === 0) {
@@ -431,7 +438,20 @@ export async function setJobStatus(id: number, status: string, actorId?: number)
   const isActivating = before.status === 'cancelled' && (status === 'sent' || status === 'signed');
   const needsOverlap = (status === 'sent' || status === 'signed');
   if (needsOverlap) {
-    const changes = await __setJobStatusConditional(id, status, before.status);
+    let changes = 0;
+    if (isActivating) {
+      const dow = getVancouverParts(before.starts_at).dow;
+      const sMin = minutesOfDay(before.starts_at);
+      const eParts = getVancouverParts(before.ends_at);
+      let eMin = minutesOfDay(before.ends_at);
+      if (before.ends_at > before.starts_at && eMin===0 && eParts.hour===0 && eParts.minute===0) eMin = 1440;
+      const sameDateOk = sameLocalDate(before.starts_at, before.ends_at) ? '1' : '0';
+      const availExists = availabilitySqlExistsForConstants(before.tech_id, dow, sMin, eMin);
+      const r:any = await d1Run(`UPDATE jobs SET status = ?, updated_at = unixepoch() WHERE id = ? AND status = ? AND ${sameDateOk}=1 AND ${availExists} AND NOT EXISTS (SELECT 1 FROM jobs AS other WHERE other.tech_id = jobs.tech_id AND other.id != jobs.id AND other.status != 'cancelled' AND other.starts_at < jobs.ends_at + ${BUFFER_SEC} AND other.ends_at > jobs.starts_at - ${BUFFER_SEC})`, status, id, before.status);
+      changes = getMutationMeta(r).changes;
+    } else {
+      changes = await __setJobStatusConditional(id, status, before.status);
+    }
     if (changes === 0) {
       const cur:any = await d1Get(`SELECT * FROM jobs WHERE id = ?`, id);
       if (!cur) return { conflict: 'not found' };
@@ -552,7 +572,14 @@ function buildExpandedAndBlocked(templates: any[], jobs: any[], fromTs: number, 
       if (base >= toTs) break;
       const dow = getVancouverParts(base).dow;
       for (const t of templates) if (t.dow===dow) {
-        const s = base + t.start_min*60; const e = base + t.end_min*60;
+        const s = vancouverWallToEpoch(curYear, curMonth, curDay, Math.floor(t.start_min/60), t.start_min%60);
+        let e: number;
+        if (t.end_min === 1440) {
+          const nxt = new Date(Date.UTC(curYear, curMonth-1, curDay)); nxt.setUTCDate(nxt.getUTCDate()+1);
+          e = vancouverWallToEpoch(nxt.getUTCFullYear(), nxt.getUTCMonth()+1, nxt.getUTCDate(), 0, 0);
+        } else {
+          e = vancouverWallToEpoch(curYear, curMonth, curDay, Math.floor(t.end_min/60), t.end_min%60);
+        }
         if (e<=s) continue; const cs=Math.max(s,fromTs); const ce=Math.min(e,toTs); if(ce>cs) expanded.push({starts_at:cs, ends_at:ce});
       }
       const next = new Date(Date.UTC(curYear, curMonth-1, curDay));

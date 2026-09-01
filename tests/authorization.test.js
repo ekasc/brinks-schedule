@@ -162,14 +162,14 @@ describe('technician scoping (db)', () => {
     const techB = await db.createUser(`techB_${Date.now()}`, 'pass123', 'tech', 'Tech B');
     const sales = await db.createUser(`sales_${Date.now()}`, 'pass123', 'sales', 'Sales');
     const day = '2030-07-01';
-    const s = (h,m=0)=>Math.floor(new Date(`${day}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00`).getTime()/1000);
+    const s = (h,m=0)=>{ const [y,mo,da]=day.split('-').map(Number); let guess=Date.UTC(y,mo-1,da,h,m,0)/1000; for(let i=0;i<3;i++){ const fmt=new Intl.DateTimeFormat('en-US',{timeZone:'America/Vancouver',year:'numeric',month:'numeric',day:'numeric',hour:'numeric',minute:'numeric',second:'numeric',hour12:false}); const parts=fmt.formatToParts(new Date(guess*1000)); const mp=new Map(parts.map(p=>[p.type,p.value])); const py=Number(mp.get('year')), pm=Number(mp.get('month')), pd=Number(mp.get('day')), ph=Number(mp.get('hour')), pmi=Number(mp.get('minute')), ps=Number(mp.get('second')); const guessWall=Date.UTC(py,pm-1,pd,ph,pmi,ps)/1000; const desiredWall=Date.UTC(y,mo-1,da,h,m,0)/1000; const delta=desiredWall-guessWall; if(delta===0) break; guess+=delta; } return Math.floor(guess); };
     await setHours(techA, s(9), s(17));
     await setHours(techB, s(9), s(17));
     const rA = await db.createJob({ tech_id: techA, booked_by: sales, client_name: 'A Client', address: '1 St', starts_at: s(10), ends_at: s(11) });
     const rB = await db.createJob({ tech_id: techB, booked_by: sales, client_name: 'B Client', address: '2 St', starts_at: s(12), ends_at: s(13) });
     assert.ok('id' in rA && 'id' in rB);
     // simulate route load: techA forces techId = techA, should only get own job
-    const dayStart = s(0); const nextDay = new Date(2030, 6, 1, 0,0,0,0); nextDay.setDate(nextDay.getDate()+1); const dayEnd = Math.floor(nextDay.getTime()/1000);
+    const s0 = s(0); const dayStart = s0; const dayEnd = (()=>{ const y=2030,mo=7,da=2; let guess=Date.UTC(y,mo-1,da,0,0,0)/1000; for(let i=0;i<3;i++){ const fmt=new Intl.DateTimeFormat('en-US',{timeZone:'America/Vancouver',year:'numeric',month:'numeric',day:'numeric',hour:'numeric',minute:'numeric',second:'numeric',hour12:false}); const parts=fmt.formatToParts(new Date(guess*1000)); const mp=new Map(parts.map(p=>[p.type,p.value])); const py=Number(mp.get('year')), pm=Number(mp.get('month')), pd=Number(mp.get('day')), ph=Number(mp.get('hour')), pmi=Number(mp.get('minute')), ps=Number(mp.get('second')); const guessWall=Date.UTC(py,pm-1,pd,ph,pmi,ps)/1000; const desiredWall=Date.UTC(y,mo-1,da,0,0,0)/1000; const delta=desiredWall-guessWall; if(delta===0) break; guess+=delta; } return Math.floor(guess); })();
     const jobsForA = await db.listJobs(dayStart, dayEnd, techA);
     assert.equal(jobsForA.length, 1);
     assert.equal(jobsForA[0].tech_id, techA);
