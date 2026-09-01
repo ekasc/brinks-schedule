@@ -46,10 +46,7 @@
       const eMin = Math.max(...rows.map((r:any)=>r.end_min));
       next[dow] = { on: true, start: minToStr(sMin), end: minToStr(eMin) };
     }
-    // if no avail at all, default Mon-Fri on
-    if (!avail.length) {
-      for (const dow of [1,2,3,4,5]) next[dow].on = true;
-    }
+    // No default: all-off means explicitly not working. User must opt in.
     daySlots = next;
     initializedFor = selectedTech;
   }
@@ -71,7 +68,12 @@
       if (em>1440 || sm<0) { saveErr=`Invalid time on ${d.label}`; return; }
       patterns.push({ dow: d.dow, start_min: sm, end_min: em, kind:'available' });
     }
-    if (!patterns.length) { saveErr='Pick at least one day'; return; }
+    // Allow all-off (empty) to explicitly mark the week as not working.
+    // Do not default to Mon-Fri; empty means no availability.
+    if (!patterns.length) {
+      // Confirm with user that they want to clear all hours.
+      if (!confirm('Save with no days enabled? This will make you unavailable for all bookings.')) return;
+    }
     saving=true;
     try{
       const fd=new FormData();

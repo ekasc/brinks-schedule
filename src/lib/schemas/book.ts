@@ -5,7 +5,8 @@ const validDate = z.string().min(1, 'Choose a time from the calendar — tap a d
 
 export const bookJobSchema = z.object({
   client_name: z.string().trim().min(2, 'Full name needs at least 2 characters.').min(1, 'Full name is required.'),
-  address: z.string().trim().min(5, 'Address needs at least 5 characters so the tech can find it.').min(1, 'Address is required.'),
+  // address is server-composed from the split fields; never trust a client-supplied hidden field.
+  address: z.string().trim().optional().or(z.literal('')),
   street: z.string().trim().min(2, 'Street needs at least 2 characters').min(1, 'Street is required.'),
   city: z.string().trim().min(2, 'City needs at least 2 characters').min(1, 'City is required.'),
   province: z.string().trim().regex(/^[A-Za-z]{2}$/, 'Use 2-letter province, e.g. BC').min(1, 'Province is required.'),

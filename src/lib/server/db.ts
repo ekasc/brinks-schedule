@@ -217,7 +217,29 @@ export async function recordLoginResult(key:string,success:boolean){
 }
 
 // availability
-export async function addAvailability(techId: number, startsAt: number, endsAt: number, note: string|null){ const r:any = await d1Run(`INSERT INTO availability_blocks (tech_id, starts_at, ends_at, note) VALUES (?, ?, ?, ?)`, techId, startsAt, endsAt, note); return Number(r.lastInsertRowid ?? r.meta?.last_row_id ?? 0); }
+export async function addAvailability(techId: number, startsAt: number, endsAt: number, note: string|null){
+  // Legacy shim: availability_blocks are retired — isJobWithinAvailability and
+  // getAvailableSlots now use only availability_templates (one slot per dow).
+  // Keep the old call-site working by translating the concrete timestamp
+  // interval into a template row (coalesced per dow via setPatternsForTech).
+  const dow = new Date(startsAt * 1000).getDay();
+  const sMin = new Date(startsAt * 1000).getHours() * 60 + new Date(startsAt * 1000).getMinutes();
+  let eMin = new Date(endsAt * 1000).getHours() * 60 + new Date(endsAt * 1000).getMinutes();
+  if (eMin === 0 && endsAt > startsAt) eMin = 1440;
+  const existing = await d1All(`SELECT dow, start_min, end_min FROM availability_templates WHERE tech_id = ? AND kind = 'available'`, techId) as Array<{dow:number; start_min:number; end_min:number}>;
+  const byDow = new Map<number, {sMin:number; eMin:number}>();
+  for (const r of existing) {
+    const cur = byDow.get(r.dow);
+    if (!cur) byDow.set(r.dow, { sMin: r.start_min, eMin: r.end_min });
+    else { cur.sMin = Math.min(cur.sMin, r.start_min); cur.eMin = Math.max(cur.eMin, r.end_min); }
+  }
+  const cur = byDow.get(dow);
+  if (cur) { cur.sMin = Math.min(cur.sMin, sMin); cur.eMin = Math.max(cur.eMin, eMin); }
+  else byDow.set(dow, { sMin, eMin });
+  const patterns = Array.from(byDow.entries()).map(([d, v]) => ({ dow: d, start_min: v.sMin, end_min: v.eMin, kind: 'available' as const }));
+  await setPatternsForTech(techId, patterns as any);
+  return 0;
+}
 export async function listAvailability(techId: number, fromTs: number, toTs: number){ return await d1All(`SELECT * FROM availability_blocks WHERE tech_id = ? AND starts_at < ? AND ends_at > ? ORDER BY starts_at`, techId, toTs, fromTs) as AvailabilityBlock[]; }
 export async function listAvailabilityForTechs(techIds: number[], fromTs: number, toTs: number): Promise<AvailabilityBlock[]>{
   if (!techIds.length) return [];
@@ -263,13 +285,14 @@ export async function setPatternsForTech(techId: number, patterns: {dow:number; 
   const d1 = getD1();
   const existing = await d1All(`SELECT id, dow, start_min, end_min, kind FROM availability_templates WHERE tech_id = ?`, techId) as Array<{id:number; dow:number; start_min:number; end_min:number; kind:string}>;
   // Always remove unavailable-kind rows; UI does not model them anymore.
-  const byDowAvailable = new Map<number, {sMin:number; eMin:number}>();
+  const byDowAvailable = new Map<number, {sMin:number; eMin:number; count:number}>();
   for (const r of existing) {
     if (r.kind === 'unavailable') continue; // dropped
     const cur = byDowAvailable.get(r.dow);
-    if (!cur) { byDowAvailable.set(r.dow, {sMin: r.start_min, eMin: r.end_min}); continue; }
+    if (!cur) { byDowAvailable.set(r.dow, {sMin: r.start_min, eMin: r.end_min, count: 1}); continue; }
     cur.sMin = Math.min(cur.sMin, r.start_min);
     cur.eMin = Math.max(cur.eMin, r.end_min);
+    cur.count++;
   }
   // Build desired set from input (assumed already deduped per dow by caller).
   const desired = new Map<number, {sMin:number; eMin:number}>();
@@ -287,13 +310,18 @@ export async function setPatternsForTech(techId: number, patterns: {dow:number; 
     }
     return;
   }
-  // Detect change vs. existing.
+  // Detect change vs. existing. Also normalize when a dow has multiple rows even if
+  // coalesced min/max matches desired single row - we must collapse to one row.
   let changed = byDowAvailable.size !== desired.size;
   if (!changed) {
     for (const [dow, d] of desired) {
       const ex = byDowAvailable.get(dow);
-      if (!ex || ex.sMin !== d.sMin || ex.eMin !== d.eMin) { changed = true; break; }
+      if (!ex || ex.sMin !== d.sMin || ex.eMin !== d.eMin || ex.count !== 1) { changed = true; break; }
     }
+  }
+  // Also check if any existing dow has count !=1 (legacy multi-row) even if desired is empty (all-off).
+  if (!changed && desired.size === 0) {
+    for (const [, v] of byDowAvailable) if (v.count !== 1) { changed = true; break; }
   }
   if (!changed) return;
   if (d1) {
@@ -372,22 +400,10 @@ export async function isJobWithinAvailability(techId: number, startsAt: number, 
   const eMin = minutesOfDay(endsAt);
   const eMinAdj = endsAt > startsAt && eMin===0 && new Date(endsAt*1000).getHours()===0 && new Date(endsAt*1000).getMinutes()===0 ? 1440 : eMin;
   const templates = await listTemplates(techId);
-  // unavailable template overlap rejects immediately
+  // Hours (availability_templates, kind='available') is the sole source of truth.
+  // Legacy availability_blocks and unavailable-kind rows are retired.
   for (const t of templates) {
     if (t.dow !== dow) continue;
-    const kind = (t as any).kind ?? 'available';
-    if (kind === 'unavailable' && t.start_min < eMinAdj && t.end_min > sMin) return false;
-  }
-  // ad hoc unavailable
-  const unavailable = await listUnavailable(techId, startsAt, endsAt);
-  if (unavailable.some(u => u.starts_at < endsAt && u.ends_at > startsAt)) return false;
-  // available check: inside an available template OR extra block
-  const block = await d1Get(`SELECT id FROM availability_blocks WHERE tech_id = ? AND starts_at <= ? AND ends_at >= ? LIMIT 1`, techId, startsAt, endsAt);
-  if (block) return true;
-  for (const t of templates) {
-    if (t.dow !== dow) continue;
-    const kind = (t as any).kind ?? 'available';
-    if (kind !== 'available') continue;
     if (t.start_min <= sMin && eMinAdj <= t.end_min) return true;
   }
   return false;
@@ -397,28 +413,14 @@ function availabilitySqlExists(techIdParam: string, startsParam: string, endsPar
   const endMinExpr = `CASE WHEN CAST(strftime('%H', datetime(${endsParam}, 'unixepoch','localtime')) AS INTEGER)=0 AND CAST(strftime('%M', datetime(${endsParam}, 'unixepoch','localtime')) AS INTEGER)=0 THEN 1440 ELSE CAST(strftime('%H', datetime(${endsParam}, 'unixepoch','localtime')) AS INTEGER)*60 + CAST(strftime('%M', datetime(${endsParam}, 'unixepoch','localtime')) AS INTEGER) END`;
   const dowExpr = `CAST(strftime('%w', datetime(${startsParam}, 'unixepoch','localtime')) AS INTEGER)`;
   return `(
-    (
-      EXISTS (SELECT 1 FROM availability_blocks WHERE tech_id = ${techIdParam} AND starts_at <= ${startsParam} AND ends_at >= ${endsParam})
-      OR EXISTS (
-        SELECT 1 FROM availability_templates
-        WHERE tech_id = ${techIdParam}
-          AND kind = 'available'
-          AND dow = ${dowExpr}
-          AND date(datetime(${startsParam}, 'unixepoch','localtime')) = date(datetime(${endsParam}, 'unixepoch','localtime'))
-          AND start_min <= ${startMinExpr}
-          AND end_min >= ${endMinExpr}
-      )
-    )
-    AND NOT EXISTS (
+    EXISTS (
       SELECT 1 FROM availability_templates
       WHERE tech_id = ${techIdParam}
-        AND kind = 'unavailable'
         AND dow = ${dowExpr}
         AND date(datetime(${startsParam}, 'unixepoch','localtime')) = date(datetime(${endsParam}, 'unixepoch','localtime'))
-        AND start_min < ${endMinExpr}
-        AND end_min > ${startMinExpr}
+        AND start_min <= ${startMinExpr}
+        AND end_min >= ${endMinExpr}
     )
-    AND NOT EXISTS (SELECT 1 FROM availability_unavailable WHERE tech_id = ${techIdParam} AND starts_at < ${endsParam} AND ends_at > ${startsParam})
   )`;
 }
 
@@ -516,12 +518,8 @@ export async function searchJobs(q: string, fromTs?: number, toTs?: number, tech
   return (rows as any[]).map(decryptJobRow);
 }
 export async function __setJobStatusConditional(id: number, status: string, expectedStatus: string): Promise<number> {
-  const avail = `(
-      (EXISTS (SELECT 1 FROM availability_blocks WHERE tech_id = jobs.tech_id AND starts_at <= jobs.starts_at AND ends_at >= jobs.ends_at)
-       OR EXISTS (SELECT 1 FROM availability_templates WHERE tech_id = jobs.tech_id AND kind='available' AND dow = CAST(strftime('%w', datetime(jobs.starts_at,'unixepoch','localtime')) AS INTEGER) AND date(datetime(jobs.starts_at,'unixepoch','localtime'))=date(datetime(jobs.ends_at,'unixepoch','localtime')) AND start_min <= CAST(strftime('%H', datetime(jobs.starts_at,'unixepoch','localtime')) AS INTEGER)*60+CAST(strftime('%M', datetime(jobs.starts_at,'unixepoch','localtime')) AS INTEGER) AND end_min >= CASE WHEN CAST(strftime('%H', datetime(jobs.ends_at,'unixepoch','localtime')) AS INTEGER)=0 AND CAST(strftime('%M', datetime(jobs.ends_at,'unixepoch','localtime')) AS INTEGER)=0 THEN 1440 ELSE CAST(strftime('%H', datetime(jobs.ends_at,'unixepoch','localtime')) AS INTEGER)*60+CAST(strftime('%M', datetime(jobs.ends_at,'unixepoch','localtime')) AS INTEGER) END))
-      AND NOT EXISTS (SELECT 1 FROM availability_templates WHERE tech_id = jobs.tech_id AND kind='unavailable' AND dow = CAST(strftime('%w', datetime(jobs.starts_at,'unixepoch','localtime')) AS INTEGER) AND date(datetime(jobs.starts_at,'unixepoch','localtime'))=date(datetime(jobs.ends_at,'unixepoch','localtime')) AND start_min < CASE WHEN CAST(strftime('%H', datetime(jobs.ends_at,'unixepoch','localtime')) AS INTEGER)=0 AND CAST(strftime('%M', datetime(jobs.ends_at,'unixepoch','localtime')) AS INTEGER)=0 THEN 1440 ELSE CAST(strftime('%H', datetime(jobs.ends_at,'unixepoch','localtime')) AS INTEGER)*60+CAST(strftime('%M', datetime(jobs.ends_at,'unixepoch','localtime')) AS INTEGER) END AND end_min > CAST(strftime('%H', datetime(jobs.starts_at,'unixepoch','localtime')) AS INTEGER)*60+CAST(strftime('%M', datetime(jobs.starts_at,'unixepoch','localtime')) AS INTEGER))
-      AND NOT EXISTS (SELECT 1 FROM availability_unavailable WHERE tech_id = jobs.tech_id AND starts_at < jobs.ends_at AND ends_at > jobs.starts_at)
-    )`;
+  // Hours (availability_templates kind='available') is the sole source of truth.
+  const avail = availabilitySqlExists('jobs.tech_id', 'jobs.starts_at', 'jobs.ends_at');
   const r:any = await d1Run(
     `UPDATE jobs SET status = ?, updated_at = unixepoch() WHERE id = ? AND status = ? AND ${avail} AND NOT EXISTS (SELECT 1 FROM jobs AS other WHERE other.tech_id = jobs.tech_id AND other.id != jobs.id AND other.status != 'cancelled' AND other.starts_at < jobs.ends_at + ${BUFFER_SEC} AND other.ends_at > jobs.starts_at - ${BUFFER_SEC})`,
     status, id, expectedStatus
@@ -628,10 +626,8 @@ export async function reconcileJobNotifications(){
 }
 async function fetchAvailabilityRaw(techId: number, fromTs: number, toTs: number, buf: number){
   const templates = await listTemplates(techId);
-  const extraBlocks = await listAvailability(techId, fromTs, toTs);
-  const unavailable = await listUnavailable(techId, fromTs, toTs);
   const jobs = (await listJobsSummary(fromTs-buf, toTs+buf, techId)).filter((j:any)=>j.status!=='cancelled');
-  return { templates, extraBlocks, unavailable, jobs };
+  return { templates, jobs };
 }
 function buildSlotsForDurations(expanded: {starts_at:number; ends_at:number}[], blocked: {start:number; end:number}[], fromTs: number, toTs: number, step: number, durations: number[]): Record<number, {starts_at:number; ends_at:number}[]>{
   const nowSec=Math.floor(Date.now()/1000);
@@ -650,34 +646,21 @@ function buildSlotsForDurations(expanded: {starts_at:number; ends_at:number}[], 
   }
   return out;
 }
-function buildExpandedAndBlocked(templates: any[], extraBlocks: any[], unavailable: any[], jobs: any[], fromTs: number, toTs: number, buf: number){
-  const availableTemplates = templates.filter((t:any)=> (t.kind ?? 'available') === 'available');
-  const unavailableTemplates = templates.filter((t:any)=> t.kind === 'unavailable');
+function buildExpandedAndBlocked(templates: any[], jobs: any[], fromTs: number, toTs: number, buf: number){
   const expanded: {starts_at:number; ends_at:number}[] = [];
-  if (availableTemplates.length) {
+  if (templates.length) {
     const cur = new Date(fromTs*1000); cur.setHours(0,0,0,0);
     while (Math.floor(cur.getTime()/1000) < toTs) {
       const dow = cur.getDay(); const base = Math.floor(cur.getTime()/1000);
-      for (const t of availableTemplates) if (t.dow===dow) {
+      for (const t of templates) if (t.dow===dow) {
         const s = base + t.start_min*60; const e = base + t.end_min*60;
         if (e<=s) continue; const cs=Math.max(s,fromTs); const ce=Math.min(e,toTs); if(ce>cs) expanded.push({starts_at:cs, ends_at:ce});
       } cur.setDate(cur.getDate()+1);
     }
   }
-  for (const b of extraBlocks) expanded.push({starts_at:b.starts_at, ends_at:b.ends_at});
   if (!expanded.length) return { expanded, blocked: [] as {start:number; end:number}[] };
   const blocked: {start:number; end:number}[] = [];
-  for (const u of unavailable) blocked.push({start:u.starts_at, end:u.ends_at});
   for (const j of jobs) blocked.push({start:j.starts_at-buf, end:j.ends_at+buf});
-  if (unavailableTemplates.length){
-    const cur=new Date(fromTs*1000); cur.setHours(0,0,0,0);
-    while (Math.floor(cur.getTime()/1000) < toTs){
-      const dow=cur.getDay(); const base=Math.floor(cur.getTime()/1000);
-      for(const t of unavailableTemplates) if(t.dow===dow){
-        const s=base+t.start_min*60; const e=base+t.end_min*60; if(e<=s) continue; const cs=Math.max(s,fromTs); const ce=Math.min(e,toTs); if(ce>cs) blocked.push({start:cs, end:ce});
-      } cur.setDate(cur.getDate()+1);
-    }
-  }
   return { expanded, blocked };
 }
 export async function getAvailableSlots(techId: number, opts: any={}): Promise<{starts_at:number; ends_at:number}[]>{
@@ -689,8 +672,8 @@ export async function getAvailableSlots(techId: number, opts: any={}): Promise<{
 export async function getAvailableSlotsForDurations(techId: number, baseOpts: any, durations: number[]): Promise<Record<number, {starts_at:number; ends_at:number}[]>>{
   const fromTs = baseOpts.fromTs ?? Math.floor(Date.now()/1000); const horizon = new Date(); horizon.setDate(horizon.getDate()+SLOT_HORIZON_DAYS); const toTs = baseOpts.toTs ?? Math.floor(horizon.getTime()/1000);
   const step=(baseOpts.stepMin ??30)*60; const buf=(baseOpts.bufferMin ?? BUFFER_MIN)*60;
-  const { templates, extraBlocks, unavailable, jobs } = await fetchAvailabilityRaw(techId, fromTs, toTs, buf);
-  const { expanded, blocked } = buildExpandedAndBlocked(templates, extraBlocks, unavailable, jobs, fromTs, toTs, buf);
+  const { templates, jobs } = await fetchAvailabilityRaw(techId, fromTs, toTs, buf);
+  const { expanded, blocked } = buildExpandedAndBlocked(templates, jobs, fromTs, toTs, buf);
   if (!expanded.length){ const empty: Record<number,any>={}; for(const d of durations) empty[d]=[]; return empty; }
   return buildSlotsForDurations(expanded, blocked, fromTs, toTs, step, durations);
 }
@@ -699,19 +682,15 @@ export async function getAvailableSlotsForDurationsForTechs(techIds: number[], b
   if (!techIds.length) return {};
   const fromTs = baseOpts.fromTs ?? Math.floor(Date.now()/1000); const horizon = new Date(); horizon.setDate(horizon.getDate()+SLOT_HORIZON_DAYS); const toTs = baseOpts.toTs ?? Math.floor(horizon.getTime()/1000);
   const step=(baseOpts.stepMin ??30)*60; const buf=(baseOpts.bufferMin ?? BUFFER_MIN)*60;
-  const [allTemplates, allBlocks, allUnavailable, allJobs] = await Promise.all([
+  const [allTemplates, allJobs] = await Promise.all([
     listTemplatesForTechs(techIds),
-    listAvailabilityForTechs(techIds, fromTs, toTs),
-    listUnavailableForTechs(techIds, fromTs, toTs),
     listJobsForTechsSummary(fromTs-buf, toTs+buf, techIds)
   ]);
   const byTech: Record<number, Record<number, {starts_at:number; ends_at:number}[]>> = {};
   for (const techId of techIds){
     const templates = allTemplates.filter((t:any)=> t.tech_id===techId);
-    const extraBlocks = allBlocks.filter((b:any)=> b.tech_id===techId);
-    const unavailable = allUnavailable.filter((u:any)=> u.tech_id===techId);
     const jobs = allJobs.filter((j:any)=> j.tech_id===techId && j.status!=='cancelled');
-    const { expanded, blocked } = buildExpandedAndBlocked(templates, extraBlocks, unavailable, jobs, fromTs, toTs, buf);
+    const { expanded, blocked } = buildExpandedAndBlocked(templates, jobs, fromTs, toTs, buf);
     if (!expanded.length){ const perDur: Record<number,any>={}; for(const d of durations) perDur[d]=[]; byTech[techId]=perDur; continue; }
     byTech[techId] = buildSlotsForDurations(expanded, blocked, fromTs, toTs, step, durations);
   }
