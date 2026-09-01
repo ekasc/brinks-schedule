@@ -40,9 +40,10 @@ export const actions: Actions = {
     let raw = String(data.get('patterns')||'[]');
     let patterns: any[];
     try { patterns = JSON.parse(raw); } catch { return fail(400, { error: 'invalid patterns' }); }
+    if (!Array.isArray(patterns)) return fail(400, { error: 'invalid patterns' });
     for (const p of patterns) {
-      if (typeof p.dow!=='number' || p.dow<0 || p.dow>6) return fail(400, { error: 'invalid dow' });
-      if (typeof p.start_min!=='number' || typeof p.end_min!=='number') return fail(400, { error: 'invalid minutes' });
+      if (!Number.isInteger(p.dow) || p.dow<0 || p.dow>6) return fail(400, { error: 'invalid dow' });
+      if (!Number.isInteger(p.start_min) || !Number.isInteger(p.end_min)) return fail(400, { error: 'invalid minutes' });
       if (p.start_min<0 || p.end_min>1440 || p.end_min<=p.start_min) return fail(400, { error: 'invalid time range' });
       if (p.kind!=null) return fail(400, { error: 'invalid kind: only available is allowed' });
     }

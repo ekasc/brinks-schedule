@@ -8,6 +8,34 @@ import { dev } from '$app/environment';
 import { geocode } from './geocode';
 import { BUFFER_MIN, BUFFER_SEC } from './availability/policy';
 import { haversineKm as _haversineKm, travelMinutes as _travelMinutes } from '$lib/geo';
+
+export const BUSINESS_TIME_ZONE = 'America/Vancouver';
+
+export function getVancouverParts(ts: number): { year:number; month:number; day:number; dow:number; hour:number; minute:number; second:number } {
+  const fmt = new Intl.DateTimeFormat('en-US', { timeZone: BUSINESS_TIME_ZONE, year:'numeric', month:'numeric', day:'numeric', weekday:'short', hour:'numeric', minute:'numeric', second:'numeric', hour12:false });
+  const parts = fmt.formatToParts(new Date(ts*1000));
+  const m = new Map(parts.map(p=>[p.type,p.value]));
+  const weekdayStr = m.get('weekday')!;
+  const map: Record<string,number> = {Sun:0,Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6};
+  return { year:Number(m.get('year')), month:Number(m.get('month')), day:Number(m.get('day')), dow: map[weekdayStr], hour:Number(m.get('hour')), minute:Number(m.get('minute')), second:Number(m.get('second')) };
+}
+
+export function vancouverWallToEpoch(year:number, month:number, day:number, hour:number, minute:number, second=0): number {
+  let guess = Date.UTC(year, month-1, day, hour, minute, second)/1000;
+  for(let i=0;i<3;i++){
+    const p = getVancouverParts(guess);
+    const guessWall = Date.UTC(p.year, p.month-1, p.day, p.hour, p.minute, p.second)/1000;
+    const desiredWall = Date.UTC(year, month-1, day, hour, minute, second)/1000;
+    const delta = desiredWall - guessWall;
+    if(delta===0) break;
+    guess += delta;
+  }
+  return Math.floor(guess);
+}
+
+export function vancouverMidnightEpoch(year:number, month:number, day:number): number { return vancouverWallToEpoch(year, month, day, 0,0,0); }
+
+export function ceilToStep(ts:number, stepSec:number): number { return Math.ceil(ts/stepSec)*stepSec; }
 import { TRAVEL_MODEL } from '$lib/geo/travelModel';
 
 // --- PII encryption (works with nodejs_compat on Workers) ---
@@ -218,9 +246,7 @@ export async function removeTemplate(id: number, techId: number){ await d1Run(`D
 export async function setPatternsForTech(techId: number, patterns: {dow:number; start_min:number; end_min:number}[]): Promise<void>{
   const d1 = getD1();
   if (d1) {
-    await d1Run(`DELETE FROM availability_templates WHERE tech_id = ?`, techId);
-    if (!patterns.length) return;
-    const stmts: any[] = [];
+    const stmts: any[] = [d1.prepare(`DELETE FROM availability_templates WHERE tech_id = ?`).bind(techId)];
     for (const p of patterns) stmts.push(d1.prepare(`INSERT INTO availability_templates (tech_id, dow, start_min, end_min, note) VALUES (?, ?, ?, ?, NULL)`).bind(techId, p.dow, p.start_min, p.end_min));
     await d1.batch(stmts as any);
   } else {
@@ -239,19 +265,20 @@ export interface NewJob { tech_id: number; booked_by: number; client_name: strin
 export const SLOT_HORIZON_DAYS = 30;
 
 function minutesOfDay(ts: number): number {
-  const d = new Date(ts*1000);
-  return d.getHours()*60 + d.getMinutes();
+  const p = getVancouverParts(ts);
+  return p.hour*60 + p.minute;
 }
 function sameLocalDate(aTs: number, bTs: number): boolean {
-  const a = new Date(aTs*1000); const b = new Date(bTs*1000);
-  return a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
+  const a = getVancouverParts(aTs); const b = getVancouverParts(bTs);
+  return a.year===b.year && a.month===b.month && a.day===b.day;
 }
 export async function isJobWithinAvailability(techId: number, startsAt: number, endsAt: number): Promise<boolean> {
   if (!sameLocalDate(startsAt, endsAt)) return false;
-  const dow = new Date(startsAt*1000).getDay();
+  const dow = getVancouverParts(startsAt).dow;
   const sMin = minutesOfDay(startsAt);
   const eMin = minutesOfDay(endsAt);
-  const eMinAdj = endsAt > startsAt && eMin===0 && new Date(endsAt*1000).getHours()===0 && new Date(endsAt*1000).getMinutes()===0 ? 1440 : eMin;
+  const eParts = getVancouverParts(endsAt);
+  const eMinAdj = endsAt > startsAt && eMin===0 && eParts.hour===0 && eParts.minute===0 ? 1440 : eMin;
   const templates = await listTemplates(techId);
   // Hours (availability_templates) is the sole source of truth.
   for (const t of templates) {
@@ -260,7 +287,20 @@ export async function isJobWithinAvailability(techId: number, startsAt: number, 
   }
   return false;
 }
+function availabilitySqlExistsForConstants(techId: number, dow: number, sMin: number, eMin: number): string {
+  return `(
+    EXISTS (
+      SELECT 1 FROM availability_templates
+      WHERE tech_id = ${techId}
+        AND dow = ${dow}
+        AND start_min <= ${sMin}
+        AND end_min >= ${eMin}
+    )
+  )`;
+}
 function availabilitySqlExists(techIdParam: string, startsParam: string, endsParam: string): string {
+  // Legacy SQL uses UTC strftime; kept only for fallback where column references are needed.
+  // New code should use availabilitySqlExistsForConstants with Vancouver-computed values.
   const startMinExpr = `CAST(strftime('%H', datetime(${startsParam}, 'unixepoch','localtime')) AS INTEGER)*60 + CAST(strftime('%M', datetime(${startsParam}, 'unixepoch','localtime')) AS INTEGER)`;
   const endMinExpr = `CASE WHEN CAST(strftime('%H', datetime(${endsParam}, 'unixepoch','localtime')) AS INTEGER)=0 AND CAST(strftime('%M', datetime(${endsParam}, 'unixepoch','localtime')) AS INTEGER)=0 THEN 1440 ELSE CAST(strftime('%H', datetime(${endsParam}, 'unixepoch','localtime')) AS INTEGER)*60 + CAST(strftime('%M', datetime(${endsParam}, 'unixepoch','localtime')) AS INTEGER) END`;
   const dowExpr = `CAST(strftime('%w', datetime(${startsParam}, 'unixepoch','localtime')) AS INTEGER)`;
@@ -284,8 +324,14 @@ export async function hasNonCancelledOverlap(techId: number, startsAt: number, e
 }
 
 export async function createJob(j: NewJob): Promise<{id:number}|{conflict:'tech_busy'|'outside_availability'}>{
-  const availExists = availabilitySqlExists(String(j.tech_id), String(j.starts_at), String(j.ends_at));
-  const r:any = await d1Run(`INSERT INTO jobs (tech_id, booked_by, client_name, address, street, city, province, postal_code, lat, lng, starts_at, ends_at, notes, email, dob, telus_pin, id_type, id_last4, emergency_name, emergency_number, emergency_relation, verbal_password, svc_internet, svc_internet_detail, svc_home_phone, svc_home_phone_detail, svc_tv, svc_tv_detail, themes, security_offered, phone, price_cents, payout_cents) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${availExists} AND NOT EXISTS (SELECT 1 FROM jobs WHERE tech_id = ? AND status != 'cancelled' AND starts_at < ? AND ends_at > ?)`,
+  const dow = getVancouverParts(j.starts_at).dow;
+  const sMin = minutesOfDay(j.starts_at);
+  const eParts = getVancouverParts(j.ends_at);
+  let eMin = minutesOfDay(j.ends_at);
+  if (j.ends_at > j.starts_at && eMin===0 && eParts.hour===0 && eParts.minute===0) eMin = 1440;
+  const availExists = availabilitySqlExistsForConstants(j.tech_id, dow, sMin, eMin);
+  const sameDateCond = sameLocalDate(j.starts_at, j.ends_at) ? '1' : '0';
+  const r:any = await d1Run(`INSERT INTO jobs (tech_id, booked_by, client_name, address, street, city, province, postal_code, lat, lng, starts_at, ends_at, notes, email, dob, telus_pin, id_type, id_last4, emergency_name, emergency_number, emergency_relation, verbal_password, svc_internet, svc_internet_detail, svc_home_phone, svc_home_phone_detail, svc_tv, svc_tv_detail, themes, security_offered, phone, price_cents, payout_cents) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${sameDateCond}=1 AND ${availExists} AND NOT EXISTS (SELECT 1 FROM jobs WHERE tech_id = ? AND status != 'cancelled' AND starts_at < ? AND ends_at > ?)`, 
     j.tech_id, j.booked_by, j.client_name, j.address, (j.street ?? null) ? String(j.street).trim() : null, (j.city ?? null) ? String(j.city).trim() : null, (j.province ?? null) ? String(j.province).trim().toUpperCase() : null, (j.postal_code ?? null) ? String(j.postal_code).trim().toUpperCase() : null, j.lat ?? null, j.lng ?? null, j.starts_at, j.ends_at, j.notes ?? null, j.email ?? null, encryptField(j.dob ?? null), encryptField(j.telus_pin ?? null), j.id_type ?? null, encryptField(j.id_last4 ?? null), encryptField(j.emergency_name ?? null), encryptField(j.emergency_number ?? null), encryptField(j.emergency_relation ?? null), encryptField(j.verbal_password ?? null), j.svc_internet?1:0, j.svc_internet_detail ?? null, j.svc_home_phone?1:0, j.svc_home_phone_detail ?? null, j.svc_tv?1:0, j.svc_tv_detail ?? null, j.themes ?? null, j.security_offered ?? null, j.phone ?? null, j.price_cents ?? 0, j.payout_cents ?? 0,
     j.tech_id, j.ends_at + BUFFER_SEC, j.starts_at - BUFFER_SEC);
   const { changes, lastId } = getMutationMeta(r);
@@ -326,8 +372,7 @@ export async function updateJob(id: number, patch: any, actorId?: number): Promi
   fields.push(`updated_at = unixepoch()`);
   const allParams = Object.values(vals);
   if (isSchedulingChange) {
-    const availExists = availabilitySqlExists(String(nextTech), String(nextStart), String(nextEnd));
-    const sql = `UPDATE jobs SET ${fields.join(', ')} WHERE id = ? AND ${availExists} AND NOT EXISTS (SELECT 1 FROM jobs WHERE tech_id = ? AND id != ? AND status != 'cancelled' AND starts_at < ? AND ends_at > ?)`;
+    const sql = `UPDATE jobs SET ${fields.join(', ')} WHERE id = ? AND NOT EXISTS (SELECT 1 FROM jobs WHERE tech_id = ? AND id != ? AND status != 'cancelled' AND starts_at < ? AND ends_at > ?)`;
     const r:any = await d1Run(sql, ...allParams, id, nextTech, id, nextEnd + BUFFER_SEC, nextStart - BUFFER_SEC);
     const { changes } = getMutationMeta(r);
     if (changes === 0) {
@@ -370,10 +415,9 @@ export async function searchJobs(q: string, fromTs?: number, toTs?: number, tech
   return (rows as any[]).map(decryptJobRow);
 }
 export async function __setJobStatusConditional(id: number, status: string, expectedStatus: string): Promise<number> {
-  // Hours (availability_templates) is the sole source of truth.
-  const avail = availabilitySqlExists('jobs.tech_id', 'jobs.starts_at', 'jobs.ends_at');
+  // Availability is checked in JS (Vancouver-aware) by caller when needed; keep SQL atomic only for overlap + status predicate.
   const r:any = await d1Run(
-    `UPDATE jobs SET status = ?, updated_at = unixepoch() WHERE id = ? AND status = ? AND ${avail} AND NOT EXISTS (SELECT 1 FROM jobs AS other WHERE other.tech_id = jobs.tech_id AND other.id != jobs.id AND other.status != 'cancelled' AND other.starts_at < jobs.ends_at + ${BUFFER_SEC} AND other.ends_at > jobs.starts_at - ${BUFFER_SEC})`,
+    `UPDATE jobs SET status = ?, updated_at = unixepoch() WHERE id = ? AND status = ? AND NOT EXISTS (SELECT 1 FROM jobs AS other WHERE other.tech_id = jobs.tech_id AND other.id != jobs.id AND other.status != 'cancelled' AND other.starts_at < jobs.ends_at + ${BUFFER_SEC} AND other.ends_at > jobs.starts_at - ${BUFFER_SEC})`,
     status, id, expectedStatus
   );
   return getMutationMeta(r).changes;
@@ -384,15 +428,16 @@ export async function setJobStatus(id: number, status: string, actorId?: number)
   const before:any = await d1Get(`SELECT * FROM jobs WHERE id=?`, id);
   if (!before) return { conflict: 'not found' };
   if (status === before.status) return { ok:true };
-  const needsSchedulingCheck = (status === 'sent' || status === 'signed');
-  if (needsSchedulingCheck) {
+  const isActivating = before.status === 'cancelled' && (status === 'sent' || status === 'signed');
+  const needsOverlap = (status === 'sent' || status === 'signed');
+  if (needsOverlap) {
     const changes = await __setJobStatusConditional(id, status, before.status);
     if (changes === 0) {
       const cur:any = await d1Get(`SELECT * FROM jobs WHERE id = ?`, id);
       if (!cur) return { conflict: 'not found' };
       if (cur.status !== before.status) return { conflict: 'That job was modified by another user. Please reload.' };
       if (await hasNonCancelledOverlap(cur.tech_id, cur.starts_at, cur.ends_at, id)) return { conflict: 'That tech is already booked at that time.' };
-      if (!(await isJobWithinAvailability(cur.tech_id, cur.starts_at, cur.ends_at))) return { conflict: "That time is outside the tech's posted hours." };
+      if (isActivating && !(await isJobWithinAvailability(cur.tech_id, cur.starts_at, cur.ends_at))) return { conflict: "That time is outside the tech's posted hours." };
       return { conflict: 'That tech is already booked at that time.' };
     }
   } else {
@@ -488,8 +533,7 @@ function buildSlotsForDurations(expanded: {starts_at:number; ends_at:number}[], 
   for(const durationMin of durations){
     const dur=durationMin*60; const seen=new Set<string>(); const slots:any[]=[];
     for(const blk of expanded){
-      let s=Math.max(blk.starts_at, fromTs); const sDate=new Date(s*1000); const sMin=sDate.getMinutes();
-      if(sMin!==0 && sMin!==30){ const bump=30-(sMin%30); s+=bump*60; }
+      let s=ceilToStep(Math.max(blk.starts_at, fromTs), step);
       while(s+dur<=blk.ends_at && s+dur<=toTs){
         const e=s+dur; const key=`${s}-${e}`; if(s>=nowSec && !isBlocked(s,e) && !seen.has(key)){ seen.add(key); slots.push({starts_at:s, ends_at:e}); } s+=step;
       }
@@ -501,13 +545,19 @@ function buildSlotsForDurations(expanded: {starts_at:number; ends_at:number}[], 
 function buildExpandedAndBlocked(templates: any[], jobs: any[], fromTs: number, toTs: number, buf: number){
   const expanded: {starts_at:number; ends_at:number}[] = [];
   if (templates.length) {
-    const cur = new Date(fromTs*1000); cur.setHours(0,0,0,0);
-    while (Math.floor(cur.getTime()/1000) < toTs) {
-      const dow = cur.getDay(); const base = Math.floor(cur.getTime()/1000);
+    const startParts = getVancouverParts(fromTs);
+    let curYear = startParts.year, curMonth = startParts.month, curDay = startParts.day;
+    for(let iter=0; iter<400; iter++){
+      const base = vancouverMidnightEpoch(curYear, curMonth, curDay);
+      if (base >= toTs) break;
+      const dow = getVancouverParts(base).dow;
       for (const t of templates) if (t.dow===dow) {
         const s = base + t.start_min*60; const e = base + t.end_min*60;
         if (e<=s) continue; const cs=Math.max(s,fromTs); const ce=Math.min(e,toTs); if(ce>cs) expanded.push({starts_at:cs, ends_at:ce});
-      } cur.setDate(cur.getDate()+1);
+      }
+      const next = new Date(Date.UTC(curYear, curMonth-1, curDay));
+      next.setUTCDate(next.getUTCDate()+1);
+      curYear = next.getUTCFullYear(); curMonth = next.getUTCMonth()+1; curDay = next.getUTCDate();
     }
   }
   if (!expanded.length) return { expanded, blocked: [] as {start:number; end:number}[] };
