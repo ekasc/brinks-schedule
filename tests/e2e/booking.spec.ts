@@ -32,10 +32,13 @@ test.describe('booking', () => {
 
     const suffix = Date.now().toString().slice(-6);
     const clientName = `E2E Client ${suffix}`;
-    const address = `123 Test St #${suffix}, Vancouver`;
+    const address = `123 Test St #${suffix}`;
 
     await page.getByRole('textbox', { name: 'Full name (required)' }).fill(clientName);
-    await page.getByRole('combobox', { name: 'Address (required)' }).fill(address);
+    await page.getByRole('combobox', { name: 'Address line (required)' }).fill(address);
+    await page.getByPlaceholder('City *').fill('Vancouver');
+    await page.getByPlaceholder('Province *').fill('BC');
+    await page.getByPlaceholder('Postal code *').fill('V6A 1A1');
 
     await page.getByRole('textbox', { name: 'Price in dollars' }).fill('150');
 
@@ -71,7 +74,10 @@ test.describe('booking', () => {
     const suffix2 = Date.now().toString().slice(-6);
     const clientName2 = `Cal Check ${suffix2}`;
     await page.getByRole('textbox', { name: 'Full name (required)' }).fill(clientName2);
-    await page.getByRole('combobox', { name: 'Address (required)' }).fill(`999 Cal St ${suffix2}`);
+    await page.getByRole('combobox', { name: 'Address line (required)' }).fill(`999 Cal St ${suffix2}`);
+    await page.getByPlaceholder('City *').fill('Vancouver');
+    await page.getByPlaceholder('Province *').fill('BC');
+    await page.getByPlaceholder('Postal code *').fill('V6A 1A1');
     await page.getByRole('textbox', { name: 'Price in dollars' }).fill('200');
     await page.locator('#sec-book').getByRole('button', { name: 'Book job' }).click();
     await page.locator('#sec-book').getByRole('button', { name: 'Yes' }).click();
