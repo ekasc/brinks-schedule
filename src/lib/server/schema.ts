@@ -44,6 +44,11 @@ export function initializeSqliteSchema(db: any): void {
   if (!db.prepare(`PRAGMA table_info(jobs)`).all().some((c:any)=>c.name==='city')) db.exec(`ALTER TABLE jobs ADD COLUMN city TEXT;`);
   if (!db.prepare(`PRAGMA table_info(jobs)`).all().some((c:any)=>c.name==='province')) db.exec(`ALTER TABLE jobs ADD COLUMN province TEXT;`);
   if (!db.prepare(`PRAGMA table_info(availability_templates)`).all().some((c:any)=>c.name==='kind')) db.exec(`ALTER TABLE availability_templates ADD COLUMN kind TEXT NOT NULL DEFAULT 'available' CHECK (kind IN ('available','unavailable'));`);
+  // Migration: drop legacy 'unavailable' template rows and all future ad-hoc blocks.
+  // The new Hours UI has one slot per day and no block-time dialog, so old records
+  // would be invisible to users while still preventing bookings.
+  try { db.exec(`DELETE FROM availability_templates WHERE kind = 'unavailable'`); } catch {}
+  try { db.exec(`DELETE FROM availability_unavailable WHERE ends_at > unixepoch()`); } catch {}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_templates_tech_dow ON availability_templates(tech_id, dow)`); } catch {}
   try { db.exec(`CREATE INDEX IF NOT EXISTS idx_unavail_tech_starts ON availability_unavailable(tech_id, starts_at)`); } catch {}
 }

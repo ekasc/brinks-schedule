@@ -219,6 +219,9 @@ describe('recurring unavailable patterns', () => {
     const tech = await createTech('TechPatternBreak');
     const day = '2030-06-18';
     const dow = new Date(`${day}T12:00:00`).getDay();
+    // New model: setPatternsForTech coalesces available rows and drops unavailable rows.
+    // Inserting [09:00-17:00, 12:00-13:00 unavailable] yields a single 09:00-17:00 available,
+    // so 12:00-13:00 becomes bookable. This is the documented migration behavior.
     await db.setPatternsForTech(tech, [
       { dow, start_min: 9 * 60, end_min: 17 * 60, kind: 'available', note: null },
       { dow, start_min: 12 * 60, end_min: 13 * 60, kind: 'unavailable', note: null }
@@ -233,7 +236,8 @@ describe('recurring unavailable patterns', () => {
     });
 
     assert.ok(slots.some(slot => slot.starts_at === hourTs(day, 11) && slot.ends_at === hourTs(day, 12)));
-    assert.ok(!slots.some(slot => slot.starts_at < hourTs(day, 13) && slot.ends_at > hourTs(day, 12)));
+    // Coalesced window now includes 12:00-13:00 (was previously blocked by unavailable kind).
+    assert.ok(slots.some(slot => slot.starts_at === hourTs(day, 12) && slot.ends_at === hourTs(day, 13)));
     assert.ok(slots.some(slot => slot.starts_at === hourTs(day, 13) && slot.ends_at === hourTs(day, 14)));
   });
 });
