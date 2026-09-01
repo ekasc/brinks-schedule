@@ -145,13 +145,15 @@ export async function autocomplete(query: string, limit = 5): Promise<Suggestion
       return (data.features || []).slice(0, limit).map((f) => {
         const [lng, lat] = f.geometry.coordinates;
         const p = f.properties as Record<string, string>;
-        const pc = (p.postcode as string) || null;
+        // Postcode is intentionally NOT returned: OSM postcode polygons in BC are
+        // interpolated and frequently wrong. Never auto-populate the required
+        // Postal Code field with unverified data. User types it manually.
         const hn = (p.housenumber as string) || '';
         const st = (p.street as string) || (p.name as string) || '';
         const street = hn && st ? `${hn} ${st}` : st;
         const city = (p.city as string) || (p.locality as string) || null;
         const prov = (p.state as string) ? provinceToAbbr(p.state as string) : null;
-        return { label: photonLabel(f.properties), lat, lng, postal_code: pc ? String(pc).toUpperCase().trim() : null, street: street || null, city: city || null, province: prov };
+        return { label: photonLabel(f.properties), lat, lng, postal_code: null, street: street || null, city: city || null, province: prov };
       }).filter((s) => s.label);
     } catch {
       return [];
@@ -182,7 +184,8 @@ export async function autocomplete(query: string, limit = 5): Promise<Suggestion
         const street = a.house_number && a.road ? `${a.house_number} ${a.road}` : a.road || null;
         const city = a.city || a.town || a.village || null;
         const prov = a.state ? provinceToAbbr(a.state) : null;
-        return { label: r.display_name, lat: parseFloat(r.lat), lng: parseFloat(r.lon), postal_code: a.postcode ? String(a.postcode).toUpperCase().trim() : null, street, city, province: prov };
+        // Postcode intentionally omitted (see photon branch).
+        return { label: r.display_name, lat: parseFloat(r.lat), lng: parseFloat(r.lon), postal_code: null, street, city, province: prov };
       });
   } catch {
     return [];
