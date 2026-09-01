@@ -31,15 +31,46 @@ async function createSales(name) {
   return id;
 }
 
-function hourTs(dateStr, hour, min = 0) {
-  return Math.floor(new Date(`${dateStr}T${String(hour).padStart(2,'0')}:${String(min).padStart(2,'0')}:00`).getTime() / 1000);
+
+async function setHours(techId, startTs, endTs) {
+  const start = db.getVancouverParts(startTs);
+  const end = db.getVancouverParts(endTs);
+  const dow = start.dow;
+  const sMin = start.hour * 60 + start.minute;
+  let eMin = end.hour * 60 + end.minute;
+  if (eMin === 0 && endTs > startTs) eMin = 1440;
+  // merge with existing patterns to preserve other weekdays
+  const existing = await db.listTemplates(techId);
+  const byDow = new Map();
+  for (const r of existing) byDow.set(r.dow, { start_min: r.start_min, end_min: r.end_min });
+  const cur = byDow.get(dow);
+  if (cur) { cur.start_min = Math.min(cur.start_min, sMin); cur.end_min = Math.max(cur.end_min, eMin); }
+  else byDow.set(dow, { start_min: sMin, end_min: eMin });
+  await db.setPatternsForTech(techId, Array.from(byDow.entries()).map(([d,v])=>({dow: d, start_min: v.start_min, end_min: v.end_min})));
+}
+
+function hourTs(dateStr, hour, min=0){
+  const [y,m,d]=dateStr.split('-').map(Number);
+  let guess = Date.UTC(y,m-1,d,hour,min,0)/1000;
+  for(let i=0;i<3;i++){
+    const fmt = new Intl.DateTimeFormat('en-US',{timeZone:'America/Vancouver',year:'numeric',month:'numeric',day:'numeric',hour:'numeric',minute:'numeric',second:'numeric',hour12:false});
+    const parts = fmt.formatToParts(new Date(guess*1000));
+    const mp=new Map(parts.map(p=>[p.type,p.value]));
+    const py=Number(mp.get('year')), pm=Number(mp.get('month')), pd=Number(mp.get('day')), ph=Number(mp.get('hour')), pmi=Number(mp.get('minute')), ps=Number(mp.get('second'));
+    const guessWall=Date.UTC(py,pm-1,pd,ph,pmi,ps)/1000;
+    const desiredWall=Date.UTC(y,m-1,d,hour,min,0)/1000;
+    const delta=desiredWall-guessWall;
+    if(delta===0) break;
+    guess+=delta;
+  }
+  return Math.floor(guess);
 }
 
 beforeEach(async () => {
   await db.listUsers(); // ensure local DB initialized with schema
   const { default: Database } = await import('better-sqlite3');
   const sqlite = new Database(dbPath);
-  sqlite.exec('DELETE FROM jobs; DELETE FROM job_events; DELETE FROM availability_blocks; DELETE FROM availability_templates; DELETE FROM pii_access_log;');
+  sqlite.exec('DELETE FROM jobs; DELETE FROM job_events; DELETE FROM availability_templates; DELETE FROM pii_access_log;');
   sqlite.close();
 });
 
@@ -50,7 +81,7 @@ describe('sent blocks slot/conflicts', () => {
     const day = '2030-06-10';
     const blockStart = hourTs(day, 9);
     const blockEnd = hourTs(day, 17);
-    await db.addAvailability(tech, blockStart, blockEnd, null);
+    await setHours(tech, blockStart, blockEnd);
     const s1 = hourTs(day, 10);
     const e1 = hourTs(day, 11, 30);
     const r1 = await db.createJob({ tech_id: tech, booked_by: sales, client_name: 'Alice', address: '123 Main St', starts_at: s1, ends_at: e1 });
@@ -78,7 +109,7 @@ describe('sent blocks slot/conflicts', () => {
     const day = '2030-06-11';
     const blockStart = hourTs(day, 9);
     const blockEnd = hourTs(day, 17);
-    await db.addAvailability(tech, blockStart, blockEnd, null);
+    await setHours(tech, blockStart, blockEnd);
     const s = hourTs(day, 10);
     const e = hourTs(day, 11, 30);
     const r1 = await db.createJob({ tech_id: tech, booked_by: sales, client_name: 'Dave', address: '1 St', starts_at: s, ends_at: e });
@@ -96,7 +127,7 @@ describe('sent blocks slot/conflicts', () => {
     const tech = await createTech('TechBuffer');
     const sales = await createSales('SalesBuffer');
     const day = '2030-06-16';
-    await db.addAvailability(tech, hourTs(day, 9), hourTs(day, 17), null);
+    await setHours(tech, hourTs(day, 9), hourTs(day, 17));
     const s1 = hourTs(day, 10), e1 = hourTs(day, 11);
     const r1 = await db.createJob({ tech_id: tech, booked_by: sales, client_name:'Buf1', address:'a', starts_at:s1, ends_at:e1 });
     assert.ok('id' in r1);
@@ -110,7 +141,7 @@ describe('sent blocks slot/conflicts', () => {
     const tech = await createTech('TechRaceBuf');
     const sales = await createSales('SalesRaceBuf');
     const day='2030-06-17';
-    await db.addAvailability(tech, hourTs(day,9), hourTs(day,17), null);
+    await setHours(tech, hourTs(day,9), hourTs(day,17));
     const sA=hourTs(day,10), eA=hourTs(day,11);
     const sB=hourTs(day,11), eB=hourTs(day,12);
     const pA = db.createJob({ tech_id: tech, booked_by: sales, client_name:'RaceA', address:'a', starts_at:sA, ends_at:eA });
@@ -129,7 +160,7 @@ describe('full availability containment', () => {
     const tech = await createTech('TechC');
     const sales = await createSales('SalesC');
     const day = '2030-06-12';
-    await db.addAvailability(tech, hourTs(day, 10), hourTs(day, 11), null);
+    await setHours(tech, hourTs(day, 10), hourTs(day, 11));
     // starts before block
     const r1 = await db.createJob({ tech_id: tech, booked_by: sales, client_name: 'F', address: 'a', starts_at: hourTs(day, 9, 30), ends_at: hourTs(day, 10, 30) });
     assert.equal(r1.conflict, 'outside_availability');
@@ -150,7 +181,7 @@ describe('sent/signed status transition conflict', () => {
     const tech = await createTech('TechD');
     const sales = await createSales('SalesD');
     const day = '2030-06-13';
-    await db.addAvailability(tech, hourTs(day, 9), hourTs(day, 17), null);
+    await setHours(tech, hourTs(day, 9), hourTs(day, 17));
     // create two non-overlapping sent jobs, then manually make them overlap via direct DB to simulate legacy data
     const s1 = hourTs(day, 10);
     const e1 = hourTs(day, 11);
@@ -184,7 +215,7 @@ describe('sent/signed status transition conflict', () => {
     const tech = await createTech('TechE');
     const sales = await createSales('SalesE');
     const day = '2030-06-14';
-    await db.addAvailability(tech, hourTs(day, 9), hourTs(day, 17), null);
+    await setHours(tech, hourTs(day, 9), hourTs(day, 17));
     const s = hourTs(day, 10);
     const e = hourTs(day, 11);
     const r1 = await db.createJob({ tech_id: tech, booked_by: sales, client_name: 'K', address: 'a', starts_at: s, ends_at: e });
@@ -205,36 +236,12 @@ describe('duplicate exact slot output', () => {
     const day = '2030-06-15';
     const s = hourTs(day, 9);
     const e = hourTs(day, 12);
-    await db.addAvailability(tech, s, e, null);
-    await db.addAvailability(tech, s, e, null); // duplicate exact block
+    await setHours(tech, s, e);
+    await setHours(tech, s, e); // duplicate exact block
     const slots = await db.getAvailableSlots(tech, { fromTs: s, toTs: e, durationMin: 60, stepMin: 30 });
     const keys = slots.map(x => `${x.starts_at}-${x.ends_at}`);
     const uniq = new Set(keys);
     assert.equal(keys.length, uniq.size, 'slots should be deduplicated');
-  });
-});
-
-describe('recurring unavailable patterns', () => {
-  test('an unavailable interval blocks slots inside an available interval', async () => {
-    const tech = await createTech('TechPatternBreak');
-    const day = '2030-06-18';
-    const dow = new Date(`${day}T12:00:00`).getDay();
-    await db.setPatternsForTech(tech, [
-      { dow, start_min: 9 * 60, end_min: 17 * 60, kind: 'available', note: null },
-      { dow, start_min: 12 * 60, end_min: 13 * 60, kind: 'unavailable', note: null }
-    ]);
-
-    const slots = await db.getAvailableSlots(tech, {
-      fromTs: hourTs(day, 0),
-      toTs: hourTs(day, 23, 59),
-      durationMin: 60,
-      stepMin: 30,
-      bufferMin: 0
-    });
-
-    assert.ok(slots.some(slot => slot.starts_at === hourTs(day, 11) && slot.ends_at === hourTs(day, 12)));
-    assert.ok(!slots.some(slot => slot.starts_at < hourTs(day, 13) && slot.ends_at > hourTs(day, 12)));
-    assert.ok(slots.some(slot => slot.starts_at === hourTs(day, 13) && slot.ends_at === hourTs(day, 14)));
   });
 });
 
@@ -244,8 +251,8 @@ describe('horizon DST consistency', () => {
     // We check slot generation near a DST transition uses local midnight correctly
     const tech = await createTech('TechG');
     const day = '2030-03-09'; // near DST (US)
-    await db.addAvailability(tech, hourTs(day, 9), hourTs(day, 17), null);
-    await db.addAvailability(tech, hourTs('2030-03-10', 9), hourTs('2030-03-10', 17), null);
+    await setHours(tech, hourTs(day, 9), hourTs(day, 17));
+    await setHours(tech, hourTs('2030-03-10', 9), hourTs('2030-03-10', 17));
     const slots = await db.getAvailableSlots(tech, { fromTs: hourTs(day, 0), toTs: hourTs('2030-03-10', 23, 59), durationMin: 60 });
     // slots should be on local midnights, not off-by-hour due to 86400 fixed addition
     for (const sl of slots) {

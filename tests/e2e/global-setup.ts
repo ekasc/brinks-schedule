@@ -34,17 +34,15 @@ export default async function globalSetup() {
   const tech1 = db.prepare('SELECT id FROM users WHERE username = ?').get('tech1') as { id: number };
   const tech2 = db.prepare('SELECT id FROM users WHERE username = ?').get('tech2') as { id: number };
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const todayStart = Math.floor(today.getTime() / 1000);
-
-  const blockIns = db.prepare('INSERT INTO availability_blocks (tech_id, starts_at, ends_at, note) VALUES (?, ?, ?, ?)');
-  for (let d = 1; d <= 14; d++) {
-    const dayStart = todayStart + d * 86400;
-    blockIns.run(tech1.id, dayStart + 9 * 3600, dayStart + 17 * 3600, 'e2e block');
-    blockIns.run(tech2.id, dayStart + 9 * 3600, dayStart + 17 * 3600, 'e2e block');
+  // Weekly Hours is the sole source of truth. Seed one slot per weekday (Mon-Fri 09:00-17:00)
+  // for both techs so /book has slots without relying on the retired availability_blocks.
+  const tmplIns = db.prepare('INSERT INTO availability_templates (tech_id, dow, start_min, end_min) VALUES (?, ?, ?, ?)') ;
+  for (const tech of [tech1, tech2]) {
+    for (const dow of [1, 2, 3, 4, 5]) {
+      tmplIns.run(tech.id, dow, 9 * 60, 17 * 60);
+    }
   }
 
-  console.log(`[global-setup] seeded ${DB_PATH} via app schema with ${users.length} users + 14 days availability`);
+  console.log(`[global-setup] seeded ${DB_PATH} via app schema with ${users.length} users + Mon-Fri 09-17 templates`);
   db.close();
 }

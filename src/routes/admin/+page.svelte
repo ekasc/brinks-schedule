@@ -200,7 +200,7 @@
   @keyframes admin-dialog-in { from { opacity: 0; transform: translate(-50%, -46%) scale(0.96); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
   @keyframes admin-dialog-out { from { opacity: 1; transform: translate(-50%, -50%) scale(1); } to { opacity: 0; transform: translate(-50%, -46%) scale(0.98); } }
   :global(.admin-new-content) button:active:not(:disabled),
-  :global(.admin-edit-content) button:active:not(:disabled) { transform: scale(0.97); transition: transform 100ms ease-out; }
+  :global(.admin-edit-content) button:active:not(:disabled) { opacity: 0.7; transition: opacity 100ms ease-out; }
   @media (max-width: 640px) {
     :global(.admin-new-content),
     :global(.admin-edit-content) {

@@ -20,15 +20,46 @@ afterAll(() => {
   try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
 });
 
+
+async function setHours(techId, startTs, endTs) {
+  const start = db.getVancouverParts(startTs);
+  const end = db.getVancouverParts(endTs);
+  const dow = start.dow;
+  const sMin = start.hour * 60 + start.minute;
+  let eMin = end.hour * 60 + end.minute;
+  if (eMin === 0 && endTs > startTs) eMin = 1440;
+  // merge with existing patterns to preserve other weekdays
+  const existing = await db.listTemplates(techId);
+  const byDow = new Map();
+  for (const r of existing) byDow.set(r.dow, { start_min: r.start_min, end_min: r.end_min });
+  const cur = byDow.get(dow);
+  if (cur) { cur.start_min = Math.min(cur.start_min, sMin); cur.end_min = Math.max(cur.end_min, eMin); }
+  else byDow.set(dow, { start_min: sMin, end_min: eMin });
+  await db.setPatternsForTech(techId, Array.from(byDow.entries()).map(([d,v])=>({dow: d, start_min: v.start_min, end_min: v.end_min})));
+}
+
 function hourTs(dateStr, hour, min=0){
-  return Math.floor(new Date(`${dateStr}T${String(hour).padStart(2,'0')}:${String(min).padStart(2,'0')}:00`).getTime()/1000);
+  const [y,m,d]=dateStr.split('-').map(Number);
+  let guess = Date.UTC(y,m-1,d,hour,min,0)/1000;
+  for(let i=0;i<3;i++){
+    const fmt = new Intl.DateTimeFormat('en-US',{timeZone:'America/Vancouver',year:'numeric',month:'numeric',day:'numeric',hour:'numeric',minute:'numeric',second:'numeric',hour12:false});
+    const parts = fmt.formatToParts(new Date(guess*1000));
+    const mp=new Map(parts.map(p=>[p.type,p.value]));
+    const py=Number(mp.get('year')), pm=Number(mp.get('month')), pd=Number(mp.get('day')), ph=Number(mp.get('hour')), pmi=Number(mp.get('minute')), ps=Number(mp.get('second'));
+    const guessWall=Date.UTC(py,pm-1,pd,ph,pmi,ps)/1000;
+    const desiredWall=Date.UTC(y,m-1,d,hour,min,0)/1000;
+    const delta=desiredWall-guessWall;
+    if(delta===0) break;
+    guess+=delta;
+  }
+  return Math.floor(guess);
 }
 
 beforeEach(async ()=>{
   await db.listUsers();
   const { default: Database } = await import('better-sqlite3');
   const sqlite = new Database(dbPath);
-  sqlite.exec('DELETE FROM jobs; DELETE FROM job_events; DELETE FROM availability_blocks; DELETE FROM availability_templates; DELETE FROM pii_access_log;');
+  sqlite.exec('DELETE FROM jobs; DELETE FROM job_events; DELETE FROM availability_templates; DELETE FROM pii_access_log;');
   sqlite.close();
 });
 
@@ -37,7 +68,7 @@ describe('stale status transition regression', ()=>{
     const tech = await db.createUser(`tech_${Date.now()}_${Math.random().toString(36).slice(2)}`, 'pass123','tech','TechStale');
     const sales = await db.createUser(`sales_${Date.now()}_${Math.random().toString(36).slice(2)}`, 'pass123','sales','SalesStale');
     const day='2030-08-10';
-    await db.addAvailability(tech, hourTs(day,9), hourTs(day,17), null);
+    await setHours(tech, hourTs(day,9), hourTs(day,17));
     const s1=hourTs(day,10), e1=hourTs(day,11);
     const s2=hourTs(day,12), e2=hourTs(day,13);
     const blocker = await db.createJob({ tech_id: tech, booked_by: sales, client_name:'Blocker', address:'1 St', starts_at:s1, ends_at:e1 });
@@ -74,7 +105,7 @@ describe('stale status transition regression', ()=>{
     const tech = await db.createUser(`tech_${Date.now()}_${Math.random().toString(36).slice(2)}`, 'pass123','tech','TechHelper');
     const sales = await db.createUser(`sales_${Date.now()}_${Math.random().toString(36).slice(2)}`, 'pass123','sales','SalesHelper');
     const day='2030-08-12';
-    await db.addAvailability(tech, hourTs(day,9), hourTs(day,17), null);
+    await setHours(tech, hourTs(day,9), hourTs(day,17));
     const s1=hourTs(day,10), e1=hourTs(day,11);
     const s2=hourTs(day,12), e2=hourTs(day,13);
     const blocker = await db.createJob({ tech_id: tech, booked_by: sales, client_name:'Blk', address:'1 St', starts_at:s1, ends_at:e1 });
@@ -100,7 +131,7 @@ describe('stale status transition regression', ()=>{
     const tech = await db.createUser(`tech_${Date.now()}_${Math.random().toString(36).slice(2)}`, 'pass123','tech','TechOpt');
     const sales = await db.createUser(`sales_${Date.now()}_${Math.random().toString(36).slice(2)}`, 'pass123','sales','SalesOpt');
     const day='2030-08-11';
-    await db.addAvailability(tech, hourTs(day,9), hourTs(day,17), null);
+    await setHours(tech, hourTs(day,9), hourTs(day,17));
     const s=hourTs(day,10), e=hourTs(day,11);
     const c = await db.createJob({ tech_id: tech, booked_by: sales, client_name:'Opt', address:'1 St', starts_at:s, ends_at:e });
     assert.ok('id' in c);

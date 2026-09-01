@@ -1,6 +1,25 @@
 import { test, expect } from '@playwright/test';
 import { login } from './helpers';
 
+function nextMondayIso(): string {
+  const d = new Date();
+  const day = d.getDay();
+  const diff = (1 - day + 7) % 7 || 7; // next Monday strictly after today
+  const next = new Date(d);
+  next.setDate(d.getDate() + diff);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${next.getFullYear()}-${p(next.getMonth() + 1)}-${p(next.getDate())}`;
+}
+function nextMondayIsoIncludingToday(): string {
+  const d = new Date();
+  const day = d.getDay();
+  const diff = (1 - day + 7) % 7;
+  const next = new Date(d);
+  next.setDate(d.getDate() + diff);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${next.getFullYear()}-${p(next.getMonth() + 1)}-${p(next.getDate())}`;
+}
+
 test.describe('availability', () => {
   test('tech can view availability page', async ({ page }) => {
     await login(page, 'tech1');
@@ -8,28 +27,79 @@ test.describe('availability', () => {
     await expect(page.getByRole('heading', { name: /Hours/i })).toBeVisible();
   });
 
-  test('tech can add an availability block', async ({ page }) => {
+  test('Monday Off produces zero Monday booking slots', async ({ page }) => {
+    const mondayIso = nextMondayIso();
+
+    // Ensure Monday is On
     await login(page, 'tech1');
     await page.goto('/availability');
+    await expect(page.getByRole('heading', { name: /Hours/i })).toBeVisible();
+    let mondayField = page.locator('div.field').filter({ hasText: 'Monday' }).first();
+    await expect(mondayField).toBeVisible();
+    const isOn = await mondayField.getByText('09:00 AM').count();
+    if (isOn === 0) {
+      await mondayField.locator('label.relative').first().click();
+      await page.getByRole('button', { name: 'Save' }).click();
+      await expect(page.getByText('Saved')).toBeVisible({ timeout: 5_000 });
+      await page.reload();
+      mondayField = page.locator('div.field').filter({ hasText: 'Monday' }).first();
+    }
+    await expect(mondayField.getByText('09:00 AM')).toBeVisible();
+    // Save explicitly to ensure persisted
+    await page.getByRole('button', { name: 'Save' }).click();
+    await expect(page.getByText('Saved')).toBeVisible({ timeout: 5_000 });
 
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 2);
-    const iso = tomorrow.toISOString().slice(0, 10);
+    // Sales asserts at least one Monday slot exists
+    await page.context().clearCookies();
+    await login(page, 'ekas');
+    await page.goto('/book');
+    await expect(page.getByRole('heading', { name: /New job/i })).toBeVisible();
+    // Switch to List view for deterministic DOM
+    const listTab = page.getByRole('button', { name: 'List' });
+    if (await listTab.count()) await listTab.click();
+    await expect(page.locator('#sec-time').getByText(/\d+ slots/)).toBeVisible();
+    await expect(page.locator(`[data-slot-date="${mondayIso}"]`)).not.toHaveCount(0, { timeout: 5_000 });
 
-    const dateInput = page.locator('input[type="date"]').first();
-    if (await dateInput.count()) {
-      await dateInput.fill(iso);
-      const startInput = page.locator('input[type="time"]').first();
-      const endInput = page.locator('input[type="time"]').nth(1);
-      if ((await startInput.count()) && (await endInput.count())) {
-        await startInput.fill('10:00');
-        await endInput.fill('14:00');
-      }
-      const addBtn = page.getByRole('button', { name: /Add/i }).first();
-      await addBtn.click();
-      await expect(page.getByText(/10:00|14:00|availability/i).first()).toBeVisible({ timeout: 10_000 });
-    } else {
-      await expect(page.getByText(/Availability|block/i).first()).toBeVisible();
+    // Turn Monday Off
+    await page.context().clearCookies();
+    await login(page, 'tech1');
+    await page.goto('/availability');
+    mondayField = page.locator('div.field').filter({ hasText: 'Monday' }).first();
+    await expect(mondayField).toBeVisible();
+    // Ensure On before turning Off
+    if ((await mondayField.getByText('09:00 AM').count()) === 0) {
+      await mondayField.locator('label.relative').first().click();
+      await page.getByRole('button', { name: 'Save' }).click();
+      await expect(page.getByText('Saved')).toBeVisible();
+      await page.reload();
+      mondayField = page.locator('div.field').filter({ hasText: 'Monday' }).first();
+    }
+    await mondayField.locator('label.relative').first().click();
+    await page.getByRole('button', { name: 'Save' }).click();
+    await expect(page.getByText('Saved')).toBeVisible({ timeout: 5_000 });
+    await page.reload();
+    mondayField = page.locator('div.field').filter({ hasText: 'Monday' }).first();
+    await expect(mondayField.getByText('09:00 AM')).not.toBeVisible();
+
+    // Sales asserts zero Monday slots
+    await page.context().clearCookies();
+    await login(page, 'ekas');
+    await page.goto('/book');
+    await expect(page.getByRole('heading', { name: /New job/i })).toBeVisible();
+    const listTab2 = page.getByRole('button', { name: 'List' });
+    if (await listTab2.count()) await listTab2.click();
+    await expect(page.locator('#sec-time').getByText(/\d+ slots/)).toBeVisible();
+    await expect(page.locator(`[data-slot-date="${mondayIso}"]`)).toHaveCount(0, { timeout: 5_000 });
+
+    // Restore Monday On for subsequent tests
+    await page.context().clearCookies();
+    await login(page, 'tech1');
+    await page.goto('/availability');
+    mondayField = page.locator('div.field').filter({ hasText: 'Monday' }).first();
+    if ((await mondayField.getByText('09:00 AM').count()) === 0) {
+      await mondayField.locator('label.relative').first().click();
+      await page.getByRole('button', { name: 'Save' }).click();
+      await expect(page.getByText('Saved')).toBeVisible({ timeout: 5_000 });
     }
   });
 

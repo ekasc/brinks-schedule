@@ -1,14 +1,24 @@
 import { z } from 'zod';
 
 const optionalText = z.string().trim().optional();
-const validDate = z.string().min(1, 'Choose a time from the calendar — tap a day, then a slot.').refine((value) => !Number.isNaN(new Date(value).getTime()), 'That date isn’t valid — pick a slot from the calendar.');
+function parseTimestamp(value: string): number | null {
+  const s = String(value).trim();
+  if (/^\d{9,10}$/.test(s)) { const n = Number(s); return Number.isFinite(n) ? n : null; }
+  const t = new Date(s).getTime(); return Number.isNaN(t) ? null : Math.floor(t/1000);
+}
+const validDate = z.string().min(1, 'Choose a time from the calendar — tap a day, then a slot.').refine((value) => parseTimestamp(value) !== null, 'That date isn’t valid — pick a slot from the calendar.');
 
 export const bookJobSchema = z.object({
   client_name: z.string().trim().min(2, 'Full name needs at least 2 characters.').min(1, 'Full name is required.'),
-  address: z.string().trim().min(5, 'Address needs at least 5 characters so the tech can find it.').min(1, 'Address is required.'),
+  // address is server-composed from the split fields; never trust a client-supplied hidden field.
+  address: z.string().trim().optional().or(z.literal('')),
+  street: z.string().trim().min(2, 'Street needs at least 2 characters').min(1, 'Street is required.'),
+  city: z.string().trim().min(2, 'City needs at least 2 characters').min(1, 'City is required.'),
+  province: z.string().trim().regex(/^[A-Za-z]{2}$/, 'Use 2-letter province, e.g. BC').min(1, 'Province is required.'),
+  postal_code: z.string().trim().regex(/^[A-Za-z]\d[A-Za-z][ -]?\d[A-Za-z]\d$/, 'Enter a valid Canadian postal code, e.g. V6A 1A1.').min(1, 'Postal code is required.'),
   email: z.string().trim().email('That email doesn’t look right — try name@example.com or leave it blank.').optional().or(z.literal('')),
   dob: z.string().trim().refine((value) => value === '' || !Number.isNaN(new Date(value).getTime()), 'That date of birth isn’t valid — use YYYY-MM-DD.').optional(),
-  telus_pin: z.string().trim().regex(/^\d{4}$/, 'TELUS PIN is exactly 4 digits.').optional().or(z.literal('')),
+  telus_pin: z.string().trim().regex(/^(\d{4})(\s*,\s*\d{4}){0,9}$/, 'Each TELUS PIN must be 4 digits. Use a comma to separate multiple PINs (up to 10).').optional().or(z.literal('')),
   id_type: z.enum(['dl', 'passport', 'bcid', 'other'], { message: 'Pick Driver’s licence, Passport, BCID, or Other.' }).optional().or(z.literal('')),
   id_last4: z.string().trim().regex(/^.{4}$/, 'Last 4 of ID needs exactly 4 characters.').optional().or(z.literal('')),
   emergency_name: optionalText,
@@ -31,7 +41,11 @@ export const bookJobSchema = z.object({
   price: z.preprocess((v) => (v === '' || v == null ? undefined : Number(v)), z.number().min(0).optional()),
   lat: z.preprocess((v) => (v === '' || v == null ? undefined : Number(v)), z.number().optional()),
   lng: z.preprocess((v) => (v === '' || v == null ? undefined : Number(v)), z.number().optional())
-}).refine((value) => new Date(value.ends_at).getTime() > new Date(value.starts_at).getTime(), {
+}).refine((value) => {
+  const a = parseTimestamp(value.starts_at);
+  const b = parseTimestamp(value.ends_at);
+  return a != null && b != null && b > a;
+}, {
   path: ['ends_at'], message: 'End time needs to be after the start — pick a later slot.'
 });
 

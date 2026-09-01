@@ -41,8 +41,14 @@ export const actions: Actions = {
     const form = await superValidate(request, zod4(bookJobSchema as any));
     if (!form.valid) return fail(400, { form });
     const value = form.data as any;
-    const startsAt = Math.floor(new Date(value.starts_at).getTime() / 1000);
-    const endsAt = Math.floor(new Date(value.ends_at).getTime() / 1000);
+    const parseTs = (v: string): number | null => {
+      const s = String(v).trim();
+      if (/^\d{9,10}$/.test(s)) { const n = Number(s); return Number.isFinite(n) ? n : null; }
+      const t = new Date(s).getTime(); return Number.isNaN(t) ? null : Math.floor(t/1000);
+    };
+    const startsAt = parseTs(value.starts_at) ?? 0;
+    const endsAt = parseTs(value.ends_at) ?? 0;
+    if (!startsAt || !endsAt) return fail(400, { form, error: 'Invalid time slot.' });
     // Reproduce the slot using the actual selected duration; getAvailableSlots defaults to
     // 90-min slots, so a 60/120-min selection would never match and be wrongly rejected.
     const durationMin = Math.max(1, Math.round((endsAt - startsAt) / 60));
@@ -51,18 +57,23 @@ export const actions: Actions = {
     if (!available.some(s => s.starts_at === startsAt && s.ends_at === endsAt)) {
       return fail(409, { form, error: 'That time slot is no longer offered for this tech. Pick a different one below.' });
     }
-    // Coordinates are best-effort and server-authoritative. Never trust client-supplied
-    // lat/lng — invariant: lat/lng, if present, was derived from the current address
-    // by the server in this request. Client coords are UI state only (preview).
+    // Server is the source of truth for the composed address. Compose from the split
+    // fields, not from any client-supplied hidden value. Client sends street/city/
+    // province/postal_code; we concat + geocode that canonical string.
+    const street = String(value.street ?? '').trim();
+    const city = String(value.city ?? '').trim();
+    const province = String(value.province ?? '').trim().toUpperCase();
+    const postal = String(value.postal_code ?? '').trim().toUpperCase();
+    const canonicalAddress = [street, city, province, postal].filter(Boolean).join(', ').replace(/, ([A-Z]\d[A-Za-z][ -]?\d[A-Za-z]\d)$/, ' $1');
     let lat: number | null = null;
     let lng: number | null = null;
-    if (value.address?.trim()) {
-      let coords = await geocode(value.address);
-      if (!coords) coords = await geocode(value.address); // one retry for transient provider failure
+    if (canonicalAddress) {
+      let coords = await geocode(canonicalAddress);
+      if (!coords) coords = await geocode(canonicalAddress); // one retry for transient provider failure
       if (coords) { lat = coords.lat; lng = coords.lng; }
     }
     const unmapped = lat == null || lng == null;
-    const result = await createJob({ ...value, tech_id: value.tech_id, booked_by: locals.user.id,
+    const result = await createJob({ ...value, address: canonicalAddress, tech_id: value.tech_id, booked_by: locals.user.id,
       starts_at: startsAt, ends_at: endsAt,
       email: value.email || null, dob: value.dob || null, telus_pin: value.telus_pin || null,
       id_type: value.id_type || null, id_last4: value.id_last4 || null,
@@ -73,9 +84,10 @@ export const actions: Actions = {
       svc_tv_detail: value.svc_tv ? (value.svc_tv_detail || null) : null,
       themes: value.themes || null, security_offered: value.security_offered || null, notes: value.notes || null,
       phone: value.phone || null, price_cents: Math.round((value.price || 0) * 100),
+      street, city, province, postal_code: postal,
       lat: lat ?? null, lng: lng ?? null
     });
-    if ('conflict' in result) return fail(409, { form, error: result.conflict === 'tech_busy' ? 'That tech is already booked at that time (or the slot was just taken).' : 'That time is outside the tech\'s posted availability. Add a block first or pick a different time.' });
+    if ('conflict' in result) return fail(409, { form, error: result.conflict === 'tech_busy' ? 'That tech is already booked at that time (or the slot was just taken).' : 'That time is outside the tech\'s posted hours. Have them update their Hours page or pick a different time.' });
     await notifyJobCreated({ id: result.id, tech_id: value.tech_id, client_name: value.client_name, starts_at: startsAt }).catch(()=>{});
     throw redirect(303, `/jobs/${result.id}${unmapped ? '?unmapped=1' : ''}`);
   }

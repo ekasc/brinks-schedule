@@ -122,6 +122,24 @@ describe('job route authorization - cross-tech forbidden (real helper)', () => {
   });
 });
 
+
+async function setHours(techId, startTs, endTs) {
+  const dbmod = await import('../src/lib/server/db');
+  const start = dbmod.getVancouverParts(startTs);
+  const end = dbmod.getVancouverParts(endTs);
+  const dow = start.dow;
+  const sMin = start.hour * 60 + start.minute;
+  let eMin = end.hour * 60 + end.minute;
+  if (eMin === 0 && endTs > startTs) eMin = 1440;
+  const existing = await dbmod.listTemplates(techId);
+  const byDow = new Map();
+  for (const r of existing) byDow.set(r.dow, { start_min: r.start_min, end_min: r.end_min });
+  const cur = byDow.get(dow);
+  if (cur) { cur.start_min = Math.min(cur.start_min, sMin); cur.end_min = Math.max(cur.end_min, eMin); }
+  else byDow.set(dow, { start_min: sMin, end_min: eMin });
+  await dbmod.setPatternsForTech(techId, Array.from(byDow.entries()).map(([d,v])=>({dow: d, start_min: v.start_min, end_min: v.end_min})));
+}
+
 describe('technician scoping (db)', () => {
   let db, tmpDir, dbPath;
   beforeAll(async () => {
@@ -139,20 +157,20 @@ describe('technician scoping (db)', () => {
     await db.listUsers();
     const { default: Database } = await import('better-sqlite3');
     let sqlite = new Database(dbPath);
-    sqlite.exec("DELETE FROM jobs; DELETE FROM availability_blocks; DELETE FROM users WHERE username LIKE 'tech%';");
+    sqlite.exec("DELETE FROM jobs; DELETE FROM users WHERE username LIKE 'tech%';");
     sqlite.close();
     const techA = await db.createUser(`techA_${Date.now()}`, 'pass123', 'tech', 'Tech A');
     const techB = await db.createUser(`techB_${Date.now()}`, 'pass123', 'tech', 'Tech B');
     const sales = await db.createUser(`sales_${Date.now()}`, 'pass123', 'sales', 'Sales');
     const day = '2030-07-01';
-    const s = (h,m=0)=>Math.floor(new Date(`${day}T${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:00`).getTime()/1000);
-    await db.addAvailability(techA, s(9), s(17), null);
-    await db.addAvailability(techB, s(9), s(17), null);
+    const s = (h,m=0)=>{ const [y,mo,da]=day.split('-').map(Number); let guess=Date.UTC(y,mo-1,da,h,m,0)/1000; for(let i=0;i<3;i++){ const fmt=new Intl.DateTimeFormat('en-US',{timeZone:'America/Vancouver',year:'numeric',month:'numeric',day:'numeric',hour:'numeric',minute:'numeric',second:'numeric',hour12:false}); const parts=fmt.formatToParts(new Date(guess*1000)); const mp=new Map(parts.map(p=>[p.type,p.value])); const py=Number(mp.get('year')), pm=Number(mp.get('month')), pd=Number(mp.get('day')), ph=Number(mp.get('hour')), pmi=Number(mp.get('minute')), ps=Number(mp.get('second')); const guessWall=Date.UTC(py,pm-1,pd,ph,pmi,ps)/1000; const desiredWall=Date.UTC(y,mo-1,da,h,m,0)/1000; const delta=desiredWall-guessWall; if(delta===0) break; guess+=delta; } return Math.floor(guess); };
+    await setHours(techA, s(9), s(17));
+    await setHours(techB, s(9), s(17));
     const rA = await db.createJob({ tech_id: techA, booked_by: sales, client_name: 'A Client', address: '1 St', starts_at: s(10), ends_at: s(11) });
     const rB = await db.createJob({ tech_id: techB, booked_by: sales, client_name: 'B Client', address: '2 St', starts_at: s(12), ends_at: s(13) });
     assert.ok('id' in rA && 'id' in rB);
     // simulate route load: techA forces techId = techA, should only get own job
-    const dayStart = s(0); const nextDay = new Date(2030, 6, 1, 0,0,0,0); nextDay.setDate(nextDay.getDate()+1); const dayEnd = Math.floor(nextDay.getTime()/1000);
+    const s0 = s(0); const dayStart = s0; const dayEnd = (()=>{ const y=2030,mo=7,da=2; let guess=Date.UTC(y,mo-1,da,0,0,0)/1000; for(let i=0;i<3;i++){ const fmt=new Intl.DateTimeFormat('en-US',{timeZone:'America/Vancouver',year:'numeric',month:'numeric',day:'numeric',hour:'numeric',minute:'numeric',second:'numeric',hour12:false}); const parts=fmt.formatToParts(new Date(guess*1000)); const mp=new Map(parts.map(p=>[p.type,p.value])); const py=Number(mp.get('year')), pm=Number(mp.get('month')), pd=Number(mp.get('day')), ph=Number(mp.get('hour')), pmi=Number(mp.get('minute')), ps=Number(mp.get('second')); const guessWall=Date.UTC(py,pm-1,pd,ph,pmi,ps)/1000; const desiredWall=Date.UTC(y,mo-1,da,0,0,0)/1000; const delta=desiredWall-guessWall; if(delta===0) break; guess+=delta; } return Math.floor(guess); })();
     const jobsForA = await db.listJobs(dayStart, dayEnd, techA);
     assert.equal(jobsForA.length, 1);
     assert.equal(jobsForA[0].tech_id, techA);

@@ -18,10 +18,19 @@
   $: if (data.preselectTech && data.preselectTech !== techId && !history.state?.keepTech) techId = data.preselectTech;
   let startSlotTs = 0;
   $: clientName = $bookForm.client_name;
-  $: address = $bookForm.address;
+  $: streetVal = $bookForm.street;
+  $: cityVal = $bookForm.city;
+  $: provinceVal = $bookForm.province;
+  $: postalVal = $bookForm.postal_code;
+  $: address = $bookForm.street;
   $: email = $bookForm.email;
   $: dob = $bookForm.dob;
-  $: telusPin = $bookForm.telus_pin;
+  let telusPins: string[] = $bookForm.telus_pin ? String($bookForm.telus_pin).split(',').map((s: string)=>s.trim()).filter(Boolean) : [''];
+  if (telusPins.length === 0) telusPins = [''];
+  $: $bookForm.telus_pin = telusPins.map((s: string)=>s.trim()).filter(Boolean).join(', ');
+  function addPin() { telusPins = [...telusPins, '']; }
+  function removePin(i: number) { telusPins = telusPins.filter((_, idx) => idx !== i); if (telusPins.length === 0) telusPins = ['']; }
+  function updatePin(i: number, val: string) { telusPins[i] = val; telusPins = [...telusPins]; }
   $: idType = $bookForm.id_type;
   $: idLast4 = $bookForm.id_last4;
   $: emergencyName = $bookForm.emergency_name;
@@ -48,17 +57,20 @@
     if (min === durationMin) return;
     durationMin = min;
     startSlotTs = 0;
+    calSelectedDay = null;
   }
   function setTech(id: number) {
     techId = id;
     startSlotTs = 0;
+    calSelectedDay = null;
   }
 
   $: slots = (data.slotsByTechByDuration?.[techId]?.[durationMin] ?? data.slotsByTech[techId] ?? []);
   function localDateKey(ts:number) {
-    const d = new Date(ts * 1000);
-    const p = (n:number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`;
+    const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Vancouver', year:'numeric', month:'2-digit', day:'2-digit' });
+    const parts = fmt.formatToParts(new Date(ts*1000));
+    const m=new Map(parts.map(p=>[p.type,p.value] as const));
+    return `${m.get('year')}-${m.get('month')}-${m.get('day')}`;
   }
   $: slotsByDay = (() => {
     const map = new Map<string, { starts_at: number; ends_at: number }[]>();
@@ -74,19 +86,30 @@
   $: tomorrowIso = (() => { const d=new Date(); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); })();
   function isTomorrow(iso:string){ return iso===tomorrowIso; }
   let timeView: 'list' | 'calendar' = 'calendar';
-  let calCursor = new Date();
-  $: calYear = calCursor.getFullYear();
-  $: calMonth = calCursor.getMonth();
-  $: calMonthLabel = calCursor.toLocaleDateString(undefined,{month:'long',year:'numeric'});
-  $: calFirstWeekday = new Date(calYear, calMonth, 1).getDay();
-  $: calDaysInMonth = new Date(calYear, calMonth+1, 0).getDate();
+  let calCursor: Date = new Date();
+  function setCalCursor(d: Date) { calCursor = d; }
+  let calSelectedDay: string | null = null;
+  let lastAutoFollowIso: string | null = null;
   function slotsForCalendarDay(iso:string) {
     return slots.filter(s => localDateKey(s.starts_at) === iso);
   }
-  let calSelectedDay: string | null = null;
   $: if (!calSelectedDay && slotsByDay.length) calSelectedDay = slotsByDay[0][0];
-  function calPrev(){ calCursor = new Date(calYear, calMonth-1, 1); }
-  function calNext(){ calCursor = new Date(calYear, calMonth+1, 1); }
+  $: if (slotsByDay.length && calSelectedDay && !slotsByDay.some(([d]) => d === calSelectedDay)) {
+    calSelectedDay = slotsByDay[0][0];
+  }
+  // Auto-follow the selected day's month only when the selection itself changes.
+  // Manual Prev/Next does NOT change calSelectedDay, so navigation sticks.
+  $: if (calSelectedDay && calSelectedDay !== lastAutoFollowIso) {
+    const d = new Date(calSelectedDay + 'T00:00:00');
+    if (!isNaN(d.getTime()) && (d.getFullYear() !== calCursor.getFullYear() || d.getMonth() !== calCursor.getMonth())) {
+      calCursor = new Date(d.getFullYear(), d.getMonth(), 1);
+    }
+    lastAutoFollowIso = calSelectedDay;
+  } else if (!calSelectedDay) {
+    lastAutoFollowIso = null;
+  }
+  function calPrev(){ calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth()-1, 1); }
+  function calNext(){ calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth()+1, 1); }
   function calDateToIso(year:number, month:number, day:number){
     const m=String(month+1).padStart(2,'0'); const d=String(day).padStart(2,'0'); return `${year}-${m}-${d}`;
   }
@@ -111,20 +134,9 @@
   function fmtDayFull(slot: { starts_at: number }) { const d=new Date(slot.starts_at*1000); return d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}); }
   function isToday(iso: string) { return iso === todayIso; }
   function fmtTime(ts: number) { return new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); }
-  // Format a unix timestamp as a datetime-local string using LOCAL components so the
-  // value round-trips exactly. Using toISOString() would emit a UTC string with no
-  // timezone suffix, which the browser would parse back as LOCAL time and shift the
-  // stored booking by the user's UTC offset.
-  function toLocalInput(ts: number): string {
-    const d = new Date(ts * 1000);
-    const p = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
-  }
 
   $: selectedSlot = slots.find(s => s.starts_at === startSlotTs);
-  $: startsAtLocal = selectedSlot ? toLocalInput(selectedSlot.starts_at) : '';
-  $: endsAtLocal = selectedSlot ? toLocalInput(selectedSlot.ends_at) : '';
-  $: canSubmit = !!selectedSlot && !!clientName?.trim() && !!address?.trim() && !busy;
+  $: canSubmit = !!selectedSlot && !!clientName?.trim() && !!$bookForm.street?.trim() && !!$bookForm.city?.trim() && !!$bookForm.province?.trim() && !!$bookForm.postal_code?.trim() && !busy;
 
   const idTypes: { value: 'dl'|'passport'|'bcid'|'other'; label: string }[] = [
     { value: 'dl', label: "Driver's licence" },
@@ -250,14 +262,27 @@
         <input class={inpc} name="client_name" bind:value={$bookForm.client_name} required aria-required="true" autocomplete="name" placeholder="Full name *" aria-label="Full name (required)" aria-invalid={$errors.client_name ? "true" : undefined} style:border-color={$errors.client_name ? "var(--red)" : undefined} />
       {#if $errors.client_name}<span class="px-1 pt-1 text-[13px] leading-tight text-[var(--red)]" transition:fly={{ y: -4, duration: 160, easing: cubicOut }}>{$errors.client_name}</span>{/if}</label>
       <span id="sec-customer-addr" class="block scroll-mt-28" aria-hidden="true"></span>
-      <AddressAutocomplete name="address" bind:value={$bookForm.address} bind:lat={selLat} bind:lng={selLng} placeholder="Address *" ariaLabel="Address (required)" error={($errors as any).address?.[0]} showKey={false} required />
-      {#if $bookForm.address?.trim()}
-        {#if selLat != null && selLng != null}
-          <span class="px-1 pt-1 text-[13px] leading-tight text-[var(--blue)]">✓ Map location set — this job will appear on the route map.</span>
-        {:else}
-          <span class="px-1 pt-1 text-[13px] leading-tight text-[var(--dim)]">No map location selected. If this address can’t be matched, the job will still be booked but won’t appear on the route map.</span>
-        {/if}
-      {/if}
+      <div class="field !p-0 !flex bg-[var(--row)]">
+        <div class="flex-1 min-w-0 px-3 py-3 flex items-center">
+          <AddressAutocomplete bare name="street" bind:value={$bookForm.street} bind:lat={selLat} bind:lng={selLng} bind:city={$bookForm.city} bind:province={$bookForm.province} bind:street={$bookForm.street} placeholder="Address line *" ariaLabel="Address line (required)" error={($errors as any).street?.[0] ?? ($errors as any).address?.[0]} required />
+        </div>
+      </div>
+      <div class="field !p-0 !flex divide-x divide-[var(--line-thin)] overflow-hidden">
+        <div class="flex-[1.2] min-w-0 px-3 py-3 flex items-center bg-[var(--row)] overflow-hidden">
+          <input class="w-full min-w-0 bg-transparent py-0 text-[var(--t-17)] text-[var(--ink)] outline-none placeholder:text-[var(--dim)] truncate" name="city" bind:value={$bookForm.city} placeholder="City *" aria-label="City *" aria-invalid={$errors.city ? "true" : undefined} autocomplete="address-level2" />
+        </div>
+        <div class="w-[84px] shrink px-3 py-3 flex items-center justify-center bg-[var(--row)] overflow-hidden">
+          <input class="w-full min-w-0 bg-transparent py-0 text-[var(--t-17)] text-[var(--ink)] outline-none placeholder:text-[var(--dim)] placeholder:normal-case uppercase text-center truncate" name="province" bind:value={$bookForm.province} placeholder="Province *" aria-label="Province *" aria-invalid={$errors.province ? "true" : undefined} autocomplete="address-level1" maxlength="2" style:text-transform="uppercase" />
+        </div>
+        <div class="w-[148px] shrink px-3 py-3 flex items-center bg-[var(--row)] overflow-hidden">
+          <input class="w-full min-w-0 bg-transparent py-0 text-[var(--t-17)] text-[var(--ink)] outline-none placeholder:text-[var(--dim)] placeholder:normal-case uppercase truncate" name="postal_code" bind:value={$bookForm.postal_code} placeholder="Postal code *" aria-label="Postal code *" aria-invalid={$errors.postal_code ? "true" : undefined} autocomplete="postal-code" style:text-transform="uppercase" />
+        </div>
+      </div>
+      {#if $errors.street}<span class="px-1 pt-1 text-[13px] leading-tight text-[var(--red)]" transition:fly={{ y: -4, duration: 160, easing: cubicOut }}>{$errors.street}</span>{/if}
+      {#if $errors.city}<span class="px-1 pt-1 text-[13px] leading-tight text-[var(--red)]" transition:fly={{ y: -4, duration: 160, easing: cubicOut }}>{$errors.city}</span>{/if}
+      {#if $errors.province}<span class="px-1 pt-1 text-[13px] leading-tight text-[var(--red)]" transition:fly={{ y: -4, duration: 160, easing: cubicOut }}>{$errors.province}</span>{/if}
+      {#if $errors.postal_code}<span class="px-1 pt-1 text-[13px] leading-tight text-[var(--red)]" transition:fly={{ y: -4, duration: 160, easing: cubicOut }}>{$errors.postal_code}</span>{/if}
+      {#if $errors.address}<span class="px-1 pt-1 text-[13px] leading-tight text-[var(--red)]" transition:fly={{ y: -4, duration: 160, easing: cubicOut }}>{$errors.address}</span>{/if}
       <label class="field">
         <input class={inpc} name="email" type="email" bind:value={$bookForm.email} autocomplete="email" placeholder="Email" aria-label="Email" aria-invalid={$errors.email ? "true" : undefined} />
       {#if $errors.email}<span class="px-1 pt-1 text-[13px] leading-tight text-[var(--red)]" transition:fly={{ y: -4, duration: 160, easing: cubicOut }}>{$errors.email}</span>{/if}</label>
@@ -322,6 +347,17 @@
         <input type="hidden" name="dob" value={$bookForm.dob} />
       {#if $errors.dob}<span class="px-1 pt-1 text-[13px] leading-tight text-[var(--red)]" transition:fly={{ y: -4, duration: 160, easing: cubicOut }}>{$errors.dob}</span>{/if}</label>
     </div>
+    <div class="min-h-[20px] px-4 pt-2 text-[13px] leading-tight" aria-live="polite">
+      {#if $bookForm.street?.trim()}
+        {#if selLat != null && selLng != null}
+          <span class="text-[var(--blue)]">✓ Map location set — this job will appear on the route map.</span>
+        {:else}
+          <span class="text-[var(--dim)]">No map location selected. If this address can’t be matched, the job will still be booked but won’t appear on the route map.</span>
+        {/if}
+      {:else}
+        <span class="invisible select-none" aria-hidden="true">.</span>
+      {/if}
+    </div>
   </div>
 
   <!-- TELUS account -->
@@ -329,7 +365,19 @@
     <div class="group-title">TELUS account</div>
     <div class="input-group">
       <label class="field">
-        <input class={inpc} name="telus_pin" bind:value={$bookForm.telus_pin} inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="4-digit PIN" aria-label="4-digit PIN" aria-invalid={$errors.telus_pin ? "true" : undefined} />
+        <span class="key">TELUS Pin</span>
+        <div class="flex flex-wrap items-center gap-1 mt-2">
+          {#each telusPins as pin, i}
+            <span class="inline-flex items-center gap-1 rounded-[10px] border border-[var(--line)] bg-[var(--row2)] px-2.5 py-0">
+              <input class="w-[56px] bg-transparent py-0 text-[13px] font-medium leading-none text-[var(--ink)] placeholder:text-[var(--dim)] outline-none text-center" value={pin} oninput={(e)=>updatePin(i, (e.currentTarget as HTMLInputElement).value)} placeholder="PIN" aria-label="TELUS PIN {i+1}" />
+              {#if telusPins.length > 1}
+                <button type="button" class="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-[var(--line)] text-[var(--dim)] hover:bg-[var(--red)] hover:text-white text-[10px] leading-none aspect-square" onclick={()=>removePin(i)} aria-label="Remove PIN {i+1}">×</button>
+              {/if}
+            </span>
+          {/each}
+          <button type="button" class="inline-flex h-5 w-5 items-center justify-center rounded-full border border-[var(--line)] bg-[var(--row)] text-[12px] font-medium leading-none text-[var(--blue)] hover:bg-[var(--row2)]" onclick={addPin} aria-label="Add PIN">+</button>
+        </div>
+        <input type="hidden" name="telus_pin" value={$bookForm.telus_pin} />
       {#if $errors.telus_pin}<span class="px-1 pt-1 text-[13px] leading-tight text-[var(--red)]" transition:fly={{ y: -4, duration: 160, easing: cubicOut }}>{$errors.telus_pin}</span>{/if}</label>
       <label class="field">
         <Select.Root type="single" name="id_type" bind:value={$bookForm.id_type} items={idTypes}>
@@ -494,7 +542,7 @@
               <span class="text-[11px] font-medium px-2 py-0.5 rounded-full bg-[var(--row2)] text-[var(--dim)] border border-[var(--line-thin)]">{daySlots.length}</span>
             </div>
             <div class="slot-grid !gap-2 !px-4 !pb-4">
-              {#each daySlots as s}<Button.Root type="button" class="slot-btn !min-h-[40px] !px-3.5 !text-[14px] {s.starts_at === startSlotTs ? 'selected' : ''}" onclick={() => { startSlotTs = s.starts_at; calSelectedDay = day; }}>{fmtTime(s.starts_at)}</Button.Root>{/each}
+              {#each daySlots as s}<Button.Root type="button" data-slot-date={localDateKey(s.starts_at)} class="slot-btn !min-h-[40px] !px-3.5 !text-[14px] {s.starts_at === startSlotTs ? 'selected' : ''}" onclick={() => { startSlotTs = s.starts_at; calSelectedDay = day; }}>{fmtTime(s.starts_at)}</Button.Root>{/each}
             </div>
           </div>
         {/each}
@@ -505,7 +553,7 @@
           <Button.Root type="button" class="h-8 w-8 grid place-items-center rounded-full hover:bg-[var(--row2)] text-[var(--dim)]" onclick={calPrev} aria-label="Previous month">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
           </Button.Root>
-          <span class="text-[15px] font-semibold">{calMonthLabel}</span>
+          <span class="text-[15px] font-semibold">{calCursor.toLocaleDateString(undefined,{month:'long',year:'numeric'})}</span>
           <Button.Root type="button" class="h-8 w-8 grid place-items-center rounded-full hover:bg-[var(--row2)] text-[var(--dim)]" onclick={calNext} aria-label="Next month">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
           </Button.Root>
@@ -516,10 +564,10 @@
           {/each}
         </div>
         <div class="grid grid-cols-7 gap-px bg-[var(--line-thin)] p-px">
-          {#each Array(calFirstWeekday) as _}<div class="bg-[var(--row)] min-h-[64px]"></div>{/each}
-          {#each Array(calDaysInMonth) as _, i}
+          {#each Array(new Date(calCursor.getFullYear(), calCursor.getMonth(), 1).getDay()) as _}<div class="bg-[var(--row)] min-h-[64px]"></div>{/each}
+          {#each Array(new Date(calCursor.getFullYear(), calCursor.getMonth()+1, 0).getDate()) as _, i}
             {@const dayNum = i+1}
-            {@const iso = calDateToIso(calYear, calMonth, dayNum)}
+            {@const iso = calDateToIso(calCursor.getFullYear(), calCursor.getMonth(), dayNum)}
             {@const daySlots = slotsForCalendarDay(iso)}
             {@const isTodayCal = iso===todayIso}
             {@const isSelectedDay = iso===calSelectedDay}
@@ -537,7 +585,7 @@
               <span class="text-[13px] text-[var(--dim)]">{fmtDay(calSelectedDay)}</span>
             </div>
             <div class="slot-grid">
-              {#each slotsForCalendarDay(calSelectedDay) as s}<Button.Root type="button" class="slot-btn {s.starts_at === startSlotTs ? 'selected' : ''}" onclick={() => startSlotTs = s.starts_at}>{fmtTime(s.starts_at)}</Button.Root>{/each}
+              {#each slotsForCalendarDay(calSelectedDay) as s}<Button.Root type="button" data-slot-date={localDateKey(s.starts_at)} class="slot-btn {s.starts_at === startSlotTs ? 'selected' : ''}" onclick={() => startSlotTs = s.starts_at}>{fmtTime(s.starts_at)}</Button.Root>{/each}
             </div>
           </div>
         {:else if calSelectedDay}
@@ -574,8 +622,8 @@
     </div>
   </div>
 
-  <input type="hidden" name="starts_at" value={startsAtLocal} />
-  <input type="hidden" name="ends_at" value={endsAtLocal} />
+  <input type="hidden" name="starts_at" value={selectedSlot?.starts_at ?? ''} />
+  <input type="hidden" name="ends_at" value={selectedSlot?.ends_at ?? ''} />
 
   <div id="sec-book" class="form-section scroll-mt-24">
     <div class="flex items-center gap-3">

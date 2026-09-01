@@ -22,15 +22,8 @@ db.exec(`
     display_name TEXT NOT NULL,
     created_at INTEGER NOT NULL DEFAULT (unixepoch())
   );
-  CREATE TABLE IF NOT EXISTS availability_blocks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tech_id INTEGER NOT NULL,
-    starts_at INTEGER NOT NULL,
-    ends_at INTEGER NOT NULL,
-    note TEXT,
-    created_at INTEGER NOT NULL DEFAULT (unixepoch()),
-    FOREIGN KEY (tech_id) REFERENCES users(id) ON DELETE CASCADE
-  );
+
+  CREATE TABLE IF NOT EXISTS availability_templates (id INTEGER PRIMARY KEY AUTOINCREMENT, tech_id INTEGER NOT NULL, dow INTEGER NOT NULL CHECK (dow >=0 AND dow <=6), start_min INTEGER NOT NULL, end_min INTEGER NOT NULL, note TEXT, created_at INTEGER NOT NULL DEFAULT (unixepoch()), FOREIGN KEY (tech_id) REFERENCES users(id) ON DELETE CASCADE);
   CREATE TABLE IF NOT EXISTS jobs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     tech_id INTEGER NOT NULL,
@@ -118,15 +111,12 @@ const dummyJobs = [
 
 const seedDummyData = db.transaction(() => {
   db.prepare(`DELETE FROM jobs WHERE email LIKE '%@example.test'`).run();
-  db.prepare(`DELETE FROM availability_blocks WHERE note LIKE '[DEV]%'`).run();
 
-  const insertAvailability = db.prepare(`
-    INSERT INTO availability_blocks (tech_id, starts_at, ends_at, note) VALUES (?, ?, ?, ?)
-  `);
-  for (let day = 0; day < 14; day++) {
-    if ([0, 6].includes(new Date(localTimestamp(day, 12) * 1000).getDay())) continue;
-    insertAvailability.run(users.tech1, localTimestamp(day, 8), localTimestamp(day, 17), '[DEV] Regular hours');
-    insertAvailability.run(users.tech2, localTimestamp(day, 9), localTimestamp(day, 18), '[DEV] Regular hours');
+
+  const insertTemplate = db.prepare(`INSERT OR IGNORE INTO availability_templates (tech_id, dow, start_min, end_min) VALUES (?, ?, ?, ?)`);
+  for (const dow of [1,2,3,4,5]) {
+    insertTemplate.run(users.tech1, dow, 8*60, 17*60);
+    insertTemplate.run(users.tech2, dow, 9*60, 18*60);
   }
 
   const insertJob = db.prepare(`

@@ -21,14 +21,27 @@ afterAll(() => {
 });
 
 function hourTs(dateStr, hour, min=0){
-  return Math.floor(new Date(`${dateStr}T${String(hour).padStart(2,'0')}:${String(min).padStart(2,'0')}:00`).getTime()/1000);
+  const [y,m,d]=dateStr.split('-').map(Number);
+  let guess = Date.UTC(y,m-1,d,hour,min,0)/1000;
+  for(let i=0;i<3;i++){
+    const fmt = new Intl.DateTimeFormat('en-US',{timeZone:'America/Vancouver',year:'numeric',month:'numeric',day:'numeric',hour:'numeric',minute:'numeric',second:'numeric',hour12:false});
+    const parts = fmt.formatToParts(new Date(guess*1000));
+    const mp=new Map(parts.map(p=>[p.type,p.value]));
+    const py=Number(mp.get('year')), pm=Number(mp.get('month')), pd=Number(mp.get('day')), ph=Number(mp.get('hour')), pmi=Number(mp.get('minute')), ps=Number(mp.get('second'));
+    const guessWall=Date.UTC(py,pm-1,pd,ph,pmi,ps)/1000;
+    const desiredWall=Date.UTC(y,m-1,d,hour,min,0)/1000;
+    const delta=desiredWall-guessWall;
+    if(delta===0) break;
+    guess+=delta;
+  }
+  return Math.floor(guess);
 }
 
 beforeEach(async () => {
   await db.listUsers();
   const { default: Database } = await import('better-sqlite3');
   const sqlite = new Database(dbPath);
-  sqlite.exec('DELETE FROM jobs; DELETE FROM job_events; DELETE FROM availability_blocks; DELETE FROM availability_templates;');
+  sqlite.exec('DELETE FROM jobs; DELETE FROM job_events; DELETE FROM availability_templates;');
   sqlite.close();
 });
 
@@ -37,7 +50,8 @@ describe('PII safe boundary', () => {
     const tech = await db.createUser(`tech_${Date.now()}_${Math.random()}`, 'pass123', 'tech', 'TechPII');
     const sales = await db.createUser(`sales_${Date.now()}_${Math.random()}`, 'pass123', 'sales', 'SalesPII');
     const day='2030-08-10';
-    await db.addAvailability(tech, hourTs(day,9), hourTs(day,17), null);
+    const dow = db.getVancouverParts(hourTs(day,12)).dow;
+    await db.setPatternsForTech(tech, [{ dow, start_min: 9*60, end_min: 17*60 }]);
     const r = await db.createJob({
       tech_id: tech, booked_by: sales, client_name: 'Private Client', address: '123 Main St',
       starts_at: hourTs(day,10), ends_at: hourTs(day,11),
@@ -65,7 +79,8 @@ describe('PII safe boundary', () => {
     const tech = await db.createUser(`tech2_${Date.now()}_${Math.random()}`, 'pass123', 'tech', 'TechPII2');
     const sales = await db.createUser(`sales2_${Date.now()}_${Math.random()}`, 'pass123', 'sales', 'SalesPII2');
     const day='2030-08-11';
-    await db.addAvailability(tech, hourTs(day,9), hourTs(day,17), null);
+    const dow2 = db.getVancouverParts(hourTs(day,12)).dow;
+    await db.setPatternsForTech(tech, [{ dow: dow2, start_min: 9*60, end_min: 17*60 }]);
     await db.createJob({ tech_id: tech, booked_by: sales, client_name:'C1', address:'a', starts_at: hourTs(day,10), ends_at: hourTs(day,11), phone:'604-111-2222', dob:'1991-02-02' });
     const rows = await db.listJobsSummary(hourTs(day,9), hourTs(day,17), tech);
     for (const row of rows){

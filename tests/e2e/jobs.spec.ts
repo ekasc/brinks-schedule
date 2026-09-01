@@ -11,7 +11,10 @@ async function bookJob(page: import('@playwright/test').Page): Promise<string> {
   const suffix = Date.now().toString().slice(-6);
   const clientName = `JobE2E ${suffix}`;
   await page.getByRole('textbox', { name: 'Full name (required)' }).fill(clientName);
-  await page.getByRole('combobox', { name: 'Address (required)' }).fill(`77 Job St ${suffix}`);
+  await page.getByRole('combobox', { name: 'Address line (required)' }).fill(`77 Job St ${suffix}`);
+  await page.getByPlaceholder('City *').fill('Vancouver');
+  await page.getByPlaceholder('Province *').fill('BC');
+  await page.getByPlaceholder('Postal code *').fill('V6A 1A1');
   await page.getByRole('textbox', { name: 'Price in dollars' }).fill('120');
   const submit = page.locator('#sec-book').getByRole('button', { name: 'Book job' });
   await submit.waitFor({ state: 'visible' });
