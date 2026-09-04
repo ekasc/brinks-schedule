@@ -194,3 +194,15 @@ describe('technician scoping (db)', () => {
     assert.ok(dashA.every(j => j.tech_id === techA));
   });
 });
+
+describe('local wall dates', () => {
+  test('localIsoDay never shifts like toISOString (Vancouver evening)', async () => {
+    const { localIsoDay, localIsoTomorrow } = await import('../src/lib/dashboardView');
+    // 9pm PDT Oct 14 = Oct 15 04:00 UTC — toISOString says the 15th.
+    const evening = new Date(2026, 9, 14, 21, 30, 0);
+    assert.equal(evening.toISOString().slice(0, 10), '2026-10-15');
+    assert.equal(localIsoDay(evening), '2026-10-14');
+    assert.equal(localIsoTomorrow(evening), '2026-10-15');
+    assert.match(localIsoDay(), /^\d{4}-\d{2}-\d{2}$/);
+  });
+});

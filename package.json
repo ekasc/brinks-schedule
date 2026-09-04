@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run --exclude tests/e2e",
     "start": "node build/index.js",
     "seed": "node scripts/seed.js"
   },

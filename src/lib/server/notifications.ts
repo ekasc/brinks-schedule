@@ -40,15 +40,22 @@ interface NotificationDb {
 const db = database as unknown as NotificationDb;
 
 export async function notifyUser(userId:number, title:string, body:string, url:string|null, dedupeKey:string) {
-  const id=await db.createNotification(userId, title, body, url, dedupeKey);
-  if(id && env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY && env.VAPID_SUBJECT){
-    await pumpPush(25).catch(()=>({claimed:0,sent:0,failed:0}));
-  }
-  return id;
+  // Enqueue only. Push delivery is owned by the 15-min cron (`/api/notifications/cron`
+  // -> pumpPush). Pumping here put push-network latency (10s timeout per delivery)
+  // in the request path of bookings and status changes, making taps feel dead.
+  return db.createNotification(userId, title, body, url, dedupeKey);
 }
 
 export async function notifyJobCreated(job:{id:number;tech_id:number;client_name:string;starts_at:number}) {
   await notifyUser(job.tech_id, 'New booking', `${job.client_name} was added to your schedule.`, `/jobs/${job.id}`, `job:${job.id}:created`);
+}
+
+/** Notify tech + booker (minus the editor) that a job's details changed. Enqueue only — cron delivers. */
+export async function notifyJobEdited(job:{id:number;tech_id:number;booked_by:number;client_name:string;updated_at:number|null|undefined}, actorId:number) {
+  const key = `job:${job.id}:edited:${job.updated_at ?? 'na'}`;
+  const targets = [job.tech_id, job.booked_by].filter((uid, i, arr) => uid !== actorId && arr.indexOf(uid) === i);
+  for (const uid of targets) await db.createNotification(uid, 'Booking updated', `${job.client_name}: details edited.`, `/jobs/${job.id}`, key);
+  return targets.length;
 }
 
 function zonedUnix(parts:{year:number;month:number;day:number;hour:number}, timeZone:string){

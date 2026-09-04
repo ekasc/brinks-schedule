@@ -53,14 +53,14 @@
     j.svc_tv ? { label: 'TV', detail: j.svc_tv_detail } : null
   ].filter(Boolean) as { label: string; detail: string | null }[];
   $: nextStatus = j.status === 'sent' ? 'signed' : null;
-  $: prevStatus = j.status === 'signed' ? 'sent' : j.status === 'cancelled' ? 'sent' : null;
+  $: prevStatus = j.status === 'signed' ? 'sent' : j.status === 'cancelled' || j.status === 'declined' ? 'sent' : null;
   $: canComplete = j.status === 'signed' && !j.completed_at;
   $: canUncomplete = j.status === 'signed' && j.completed_at != null;
 
   function advance() { if (nextStatus) setStatus(nextStatus); }
   function reopen() { if (prevStatus) setStatus(prevStatus); }
 
-  const statusLabel: Record<string, string> = { sent: 'Sent', signed: 'Signed', cancelled: 'Cancelled' };
+  const statusLabel: Record<string, string> = { sent: 'Sent', signed: 'Signed', cancelled: 'Cancelled', declined: 'Declined' };
 
   function goBack() {
     if (typeof window !== 'undefined' && window.history.length > 1) history.back();
@@ -348,7 +348,8 @@
   <div class="mt-8 flex flex-col gap-3 px-4">
     <div class="flex flex-wrap gap-2">
       <!-- set-location pin-drop button removed -->
-      {#if j.status === 'cancelled'}
+      <a href={`/jobs/${j.id}/edit`} class="rounded-full bg-[var(--row)] px-4 py-2 text-[15px] font-medium text-[var(--blue)] border border-[var(--line)] hover:bg-[var(--row2)]">Edit</a>
+      {#if j.status === 'cancelled' || j.status === 'declined'}
         <Button.Root class="rounded-full bg-[var(--row)] px-4 py-2 text-[15px] font-medium text-[var(--blue)] border border-[var(--line)]" onclick={reopen} disabled={busy}>Restore</Button.Root>
       {/if}
     </div>
@@ -365,7 +366,20 @@
             </div>
           {/if}
         </div>
-        {#if j.status !== 'cancelled'}
+        {#if j.status !== 'cancelled' && j.status !== 'declined'}
+          {#if confirmStatus === 'declined'}
+            <div class="flex items-center gap-3">
+              <span class="text-[14px] text-[var(--ink)]">Decline job?</span>
+              <div in:fly={{ x: 12, duration: 220, easing: cubicOut }} out:scale={{ start: 0.96, duration: 140 }} class="shrink-0">
+                <Button.Root type="button" class="rounded-[10px] border border-[var(--line)] bg-[var(--row)] px-4 py-2 text-[14px] font-medium text-[var(--ink)] hover:bg-[var(--row2)]" onclick={() => confirmStatus = null} disabled={busy}>No</Button.Root>
+              </div>
+              <div in:fly={{ x: 12, duration: 240, easing: cubicOut, delay: 40 }} out:scale={{ start: 0.96, duration: 140 }} class="shrink-0">
+                <Button.Root type="button" class="rounded-[10px] bg-amber-500 px-4 py-2 text-[14px] font-semibold text-white hover:bg-amber-600 shadow-md" onclick={() => setStatus('declined')} disabled={busy}>Yes</Button.Root>
+              </div>
+            </div>
+          {:else}
+            <Button.Root class="rounded-[10px] border border-amber-500/20 bg-amber-500/10 px-5 py-3 text-[15px] font-medium text-amber-500 hover:bg-amber-500/15 disabled:opacity-30" onclick={() => requestStatus('declined')} disabled={busy || confirmStatus === 'cancelled'}>Decline</Button.Root>
+          {/if}
           {#if confirmStatus === 'cancelled'}
             <div class="flex items-center gap-3">
               <span class="text-[14px] text-[var(--ink)]">Cancel job?</span>
@@ -377,7 +391,7 @@
               </div>
             </div>
           {:else}
-            <Button.Root class="rounded-[10px] border border-red-500/20 bg-red-500/10 px-5 py-3 text-[15px] font-medium text-red-500 hover:bg-red-500/15 disabled:opacity-30" onclick={() => requestStatus('cancelled')} disabled={busy}>Cancel</Button.Root>
+            <Button.Root class="rounded-[10px] border border-red-500/20 bg-red-500/10 px-5 py-3 text-[15px] font-medium text-red-500 hover:bg-red-500/15 disabled:opacity-30" onclick={() => requestStatus('cancelled')} disabled={busy || confirmStatus === 'declined'}>Cancel</Button.Root>
           {/if}
         {/if}
       </div>

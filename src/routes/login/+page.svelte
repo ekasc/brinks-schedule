@@ -1,7 +1,10 @@
 <script lang="ts">
+  import { enhance } from '$app/forms';
   import type { ActionData } from './$types';
   import { Button } from 'bits-ui';
   export let form: ActionData;
+
+  let signingIn = false;
 
   const inpc = 'w-full bg-transparent py-0 text-[var(--t-17)] text-[var(--ink)] outline-none placeholder:text-[var(--dim)]';
 </script>
@@ -17,7 +20,13 @@
     <p class="mt-1.5 text-[15px] text-[var(--dim)]">Sign in to continue</p>
   </div>
 
-  <form method="POST" class="flex flex-col gap-4">
+  <form method="POST" class="flex flex-col gap-4" use:enhance={() => {
+    signingIn = true;
+    return async ({ update }) => {
+      signingIn = false;
+      await update();
+    };
+  }}>
     {#if form?.error}
       <div class="rounded-[10px] border border-[color-mix(in_srgb,var(--red)_18%,transparent)] bg-[color-mix(in_srgb,var(--red)_10%,transparent)] px-4 py-3 text-[15px] leading-snug text-[var(--red)]" role="alert">{form.error}</div>
     {/if}
@@ -31,6 +40,6 @@
         <input class={inpc} id="password" name="password" type="password" placeholder="••••••••" autocomplete="current-password" required aria-label="Password" />
       </label>
     </div>
-    <Button.Root type="submit" class="filled">Sign In</Button.Root>
+    <Button.Root type="submit" class="filled" disabled={signingIn}>{signingIn ? 'Signing in…' : 'Sign In'}</Button.Root>
   </form>
 </div>

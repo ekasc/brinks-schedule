@@ -41,8 +41,11 @@
   $: routeDisplay = selDate ? (() => { try { const d = new Date(selDate + 'T00:00:00'); return isNaN(d.getTime()) ? selDate : d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }); } catch { return selDate; } })() : '';
   function onRouteDateChange(v: CalendarDate | undefined) {
     const iso = v ? v.toString() : '';
+    if (!iso) return;
     selDate = iso;
     routeDateOpen = false;
+    sheetOpen = false;
+    goto(`/route?tech=${selTech}&date=${iso}`);
   }
   let routePlaceholder: CalendarDate | undefined = undefined;
   $: if (!routePlaceholder) routePlaceholder = routeCal ?? today(getLocalTimeZone());
@@ -83,12 +86,9 @@
   const statusColor: Record<string, string> = {
     sent: '#0A84FF',
     signed: '#22C55E',
-    cancelled: '#EF4444'
+    cancelled: '#EF4444',
+    declined: '#EF4444'
   };
-
-  function changeDate(e: Event) {
-    goto(`/route?tech=${selTech}&date=${(e.currentTarget as HTMLInputElement).value}`);
-  }
 
   $: located = [...data.jobs]
     .filter((j) => j.lat != null && j.lng != null)
@@ -181,7 +181,7 @@
     <div class="input-group">
       <label class="field">
         <span class="key">Technician</span>
-        <Select.Root type="single" value={String(selTech)} onValueChange={(v) => { if (v) selTech = Number(v); }} items={routeTechItems}>
+        <Select.Root type="single" value={String(selTech)} onValueChange={(v) => { if (v) { selTech = Number(v); goto(`/route?tech=${v}&date=${selDate}`); } }} items={routeTechItems}>
           <Select.Trigger class="w-full bg-transparent py-0 text-[var(--t-17)] text-[var(--ink)] outline-none placeholder:text-[var(--dim)] flex cursor-pointer items-center justify-between text-left data-[placeholder]:!text-[var(--dim)]" aria-label="Technician"><Select.Value placeholder="Technician" /><svg width="12" height="8" viewBox="0 0 12 8" fill="none" aria-hidden="true" class="ml-2 shrink-0 text-[var(--dim)]"><path d="M1 1.5L6 6.5L11 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></Select.Trigger>
           <Select.Portal>
             <Select.Content class="z-[1002] min-w-[220px] w-[var(--bits-floating-anchor-width)] max-w-[92vw] rounded-[10px] border border-[var(--line)] bg-[var(--row)] p-1 text-[var(--ink)] shadow-xl" sideOffset={6}>
@@ -238,9 +238,8 @@
                     {/each}
                   </Calendar.GridBody>
                 </Calendar.Grid>
-                <div class="mt-3 flex justify-between gap-2 border-t border-[var(--line-thin)] pt-3">
-                  <Button.Root type="button" class="flex-1 rounded-[8px] border border-[var(--line)] bg-[var(--row)] px-3 py-1.5 text-[13px] text-[var(--ink)] hover:bg-[var(--row2)]" onclick={() => onRouteDateChange(undefined)}>Clear</Button.Root>
-                  <Button.Root type="button" class="flex-1 rounded-[8px] bg-[var(--blue)] px-3 py-1.5 text-[13px] font-medium text-white hover:bg-[var(--blue-press)]" onclick={() => routeDateOpen = false}>Done</Button.Root>
+                <div class="mt-3 flex justify-end gap-2 border-t border-[var(--line-thin)] pt-3">
+                  <Button.Root type="button" class="rounded-[8px] bg-[var(--blue)] px-3 py-1.5 text-[13px] font-medium text-white hover:bg-[var(--blue-press)]" onclick={() => routeDateOpen = false}>Done</Button.Root>
                 </div>
               </Calendar.Root>
             </Popover.Content>
@@ -281,7 +280,6 @@
   <div class="form-section desktop-filter-panel" transition:slide={{ duration: reduceMotion ? 0 : 340, easing: cubicOut }}>
     {@render filterPlan()}
     <div class="mt-4 flex gap-2">
-      <Button.Root class="flex-1 rounded-full bg-[var(--blue)] px-4 py-3 text-[15px] font-semibold text-white hover:bg-[var(--blue-press)]" onclick={() => { goto(`/route?tech=${selTech}&date=${selDate}`); filterOpen = false; }}>Show route</Button.Root>
       <Button.Root class="rounded-full border border-[var(--line)] bg-[var(--row)] px-4 py-3 text-[15px] font-medium text-[var(--ink)] hover:bg-[var(--row2)]" onclick={() => (filterOpen = false)}>Close</Button.Root>
     </div>
   </div>
@@ -301,7 +299,6 @@
       <div class="overflow-y-auto px-4 pb-8 pt-2" style="max-height: calc(85vh - 60px);">
         {@render filterPlan()}
         <div class="mt-4 flex gap-2">
-          <Button.Root class="flex-1 rounded-full bg-[var(--blue)] px-4 py-3 text-[15px] font-semibold text-white hover:bg-[var(--blue-press)]" onclick={() => { goto(`/route?tech=${selTech}&date=${selDate}`); sheetOpen = false; }}>Show route</Button.Root>
           <Button.Root class="rounded-full border border-[var(--line)] bg-[var(--row)] px-4 py-3 text-[15px] font-medium text-[var(--ink)] hover:bg-[var(--row2)]" onclick={() => (sheetOpen = false)}>Close</Button.Root>
         </div>
       </div>

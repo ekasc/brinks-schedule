@@ -115,6 +115,11 @@ a:hover { text-decoration: none; }
 h1, h2, h3, h4 { margin: 0; }
 h1 { text-wrap: balance; }
 
+/* ─── Nav progress (instant tap feedback while the next page loads) ─── */
+.nav-progress { position: fixed; top: 0; left: 0; right: 0; z-index: 100; height: 2px; pointer-events: none; }
+.nav-progress > span { display: block; height: 100%; width: 30%; background: var(--blue); border-radius: 0 2px 2px 0; animation: nav-slide 800ms ease-in-out infinite; }
+@keyframes nav-slide { from { transform: translateX(-100%); } to { transform: translateX(350%); } }
+
 /* ─── Buttons ─── */
 button, .btn {
   appearance: none; -webkit-appearance: none;
@@ -225,6 +230,7 @@ select {
 .pill.signed { background: rgba(34, 197, 94, 0.14); color: #22C55E; border: 1px solid rgba(34, 197, 94, 0.2); }
 .pill.completed { background: var(--row2); color: var(--dim); border: 1px solid var(--line-thin); }
 .pill.cancelled { background: rgba(239, 68, 68, 0.12); color: var(--red); border: 1px solid rgba(239, 68, 68, 0.18); }
+.pill.declined { background: rgba(239, 68, 68, 0.12); color: var(--red); border: 1px solid rgba(239, 68, 68, 0.18); }
 .pill.pending { background: rgba(245, 158, 11, 0.14); color: #F59E0B; border: 1px solid rgba(245, 158, 11, 0.2); }
 .pill.installed { background: rgba(10, 132, 255, 0.12); color: var(--blue); border: 1px solid rgba(10, 132, 255, 0.18); }
 .pill.sales { background: rgba(10, 132, 255, 0.12); color: var(--blue); border: 1px solid rgba(10, 132, 255, 0.18); }
@@ -301,7 +307,10 @@ select {
   max-width: 720px;
   margin: 0 auto;
   width: 100%;
+  transition: opacity 150ms ease-out;
 }
+/* Outgoing page dims while the next page loads — pairs with the nav progress bar. */
+.page-loading { opacity: 0.55; }
 
 /* ─── Empty state ─── */
 .empty {
@@ -316,7 +325,8 @@ select {
 .empty > .hint { font-size: var(--t-13); color: var(--dim2); margin-top: var(--s-3); }
 
 /* ─── Job rows ─── */
-a.job-row {
+a.job-row,
+div.job-row {
   display: block; padding: var(--s-3) var(--s-4);
   border-bottom: 1px solid var(--line-thin);
   color: var(--ink);
@@ -328,10 +338,10 @@ a.job-row:active { background: rgba(255, 255, 255, 0.08); }
   a.job-row:hover { background: rgba(0, 0, 0, 0.04); }
   a.job-row:active { background: rgba(0, 0, 0, 0.08); }
 }
-a.job-row > .top { display: flex; justify-content: space-between; align-items: center; gap: var(--s-2); }
-a.job-row > .name { font-size: var(--t-17); font-weight: 600; }
-a.job-row > .when { font-size: var(--t-13); color: var(--dim); margin-top: 2px; }
-a.job-row > .addr { font-size: var(--t-15); color: var(--dim); margin-top: 2px; }
+.job-row > .top { display: flex; justify-content: space-between; align-items: center; gap: var(--s-2); }
+.job-row > .name { font-size: var(--t-17); font-weight: 600; }
+.job-row > .when { font-size: var(--t-13); color: var(--dim); margin-top: 2px; }
+.job-row > .addr { font-size: var(--t-15); color: var(--dim); margin-top: 2px; }
 
 /* ─── Calendar ─── */
 .cal { width: 100%; border-collapse: collapse; }

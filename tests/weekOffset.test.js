@@ -1,6 +1,6 @@
 import { describe, test } from 'vitest';
 import assert from 'node:assert/strict';
-import { parseWeekOffset } from '$lib/server/weekOffset';
+import { parseWeekOffset, startOfDayLocal } from '$lib/server/weekOffset';
 
 describe('parseWeekOffset', () => {
   test('valid integers', () => {
@@ -37,5 +37,28 @@ describe('parseWeekOffset', () => {
     assert.equal(parseWeekOffset(String(Number.MIN_SAFE_INTEGER - 1)), 0);
     assert.equal(parseWeekOffset('9007199254740992'), 0);
     assert.equal(parseWeekOffset('-9007199254740992'), 0);
+  });
+});
+
+describe('week base helpers', () => {
+  test('startOfDayLocal is local midnight, same date', () => {
+    const base = startOfDayLocal(new Date(2026, 8, 4, 15, 30, 45, 123));
+    assert.equal(base.getFullYear(), 2026);
+    assert.equal(base.getMonth(), 8);
+    assert.equal(base.getDate(), 4);
+    assert.equal(base.getHours(), 0);
+    assert.equal(base.getMinutes(), 0);
+    assert.equal(base.getSeconds(), 0);
+    assert.equal(base.getMilliseconds(), 0);
+  });
+  test('rolling base: offset weeks shift by exactly 7 days', () => {
+    const now = new Date(2026, 8, 4, 9, 0, 0);
+    for (const w of [-1, 0, 1, 2]) {
+      const base = startOfDayLocal(now);
+      base.setDate(base.getDate() + w * 7);
+      const expected = new Date(2026, 8, 4);
+      expected.setDate(expected.getDate() + w * 7);
+      assert.equal(base.getTime(), expected.getTime());
+    }
   });
 });

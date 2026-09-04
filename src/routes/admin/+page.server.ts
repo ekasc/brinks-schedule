@@ -32,24 +32,6 @@ export const actions: Actions = {
     }
     return { ok: true };
   },
-  password: async ({ request, locals }) => {
-    if (!locals.user || locals.user.role !== 'admin') return fail(403, { error: 'forbidden' });
-    const data = await request.formData();
-    const id = Number(data.get('id') || 0);
-    const password = String(data.get('password') || '');
-    if (!validId(id) || !validPassword(password) || !(await findUserById(id))) return fail(400, { error: 'bad input' });
-    await updatePassword(id, password);
-    return { ok: true };
-  },
-  rename: async ({ request, locals }) => {
-    if (!locals.user || locals.user.role !== 'admin') return fail(403, { error: 'forbidden' });
-    const data = await request.formData();
-    const id = Number(data.get('id') || 0);
-    const displayName = String(data.get('display_name') || '').trim();
-    if (!validId(id) || !validDisplayName(displayName) || !(await findUserById(id))) return fail(400, { error: 'bad input' });
-    await updateDisplayName(id, displayName);
-    return { ok: true };
-  },
   edit: async ({ request, locals }) => {
     if (!locals.user || locals.user.role !== 'admin') return fail(403, { error: 'forbidden' });
     const data = await request.formData();

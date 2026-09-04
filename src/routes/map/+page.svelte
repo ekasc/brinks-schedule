@@ -29,7 +29,8 @@
   const statusColor: Record<string, string> = {
     sent: '#0A84FF',
     signed: '#22C55E',
-    cancelled: '#EF4444'
+    cancelled: '#EF4444',
+    declined: '#EF4444'
   };
 
   $: visible = data.jobs.filter(
@@ -149,7 +150,7 @@
         </Select.Root>
       </label>
       <div class="flex gap-2">
-        {#each [['all', 'All'], ['sent', 'Sent'], ['signed', 'Signed'], ['cancelled', 'Cancelled']] as [val, label]}
+        {#each [['all', 'All'], ['sent', 'Sent'], ['signed', 'Signed'], ['cancelled', 'Cancelled'], ['declined', 'Declined']] as [val, label]}
           <Button.Root type="button" class="slot-btn {statusFilter === val ? 'selected' : ''}" onclick={() => (statusFilter = val)}>{label}</Button.Root>
         {/each}
       </div>
@@ -166,6 +167,7 @@
     <span class="flex items-center gap-1.5"><span class="inline-block h-2.5 w-2.5 rounded-full" style="background:var(--blue)"></span>Sent</span>
     <span class="flex items-center gap-1.5"><span class="inline-block h-2.5 w-2.5 rounded-full" style="background:var(--green)"></span>Signed</span>
     <span class="flex items-center gap-1.5"><span class="inline-block h-2.5 w-2.5 rounded-full" style="background:var(--red)"></span>Cancelled</span>
+    <span class="flex items-center gap-1.5"><span class="inline-block h-2.5 w-2.5 rounded-full" style="background:var(--red)"></span>Declined</span>
 </div>
 
 <div class="relative z-0 isolate mx-4 mb-8 overflow-hidden rounded-[14px] border border-[var(--line)]" style="height: calc(100vh - 320px); min-height: 380px;">

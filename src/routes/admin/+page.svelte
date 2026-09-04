@@ -1,9 +1,13 @@
 <script lang="ts">
+  import { enhance } from '$app/forms';
   import type { PageData, ActionData } from './$types';
   import { Button, Dialog } from 'bits-ui';
   import { swipeSheet } from '$lib/actions/swipeSheet';
   export let data: PageData;
   export let form: ActionData;
+
+  let creating = false;
+  let savingEdit = false;
 
   const inpc = 'w-full bg-transparent py-0 text-[var(--t-17)] text-[var(--ink)] outline-none placeholder:text-[var(--dim)]';
 
@@ -12,8 +16,14 @@
   let editOpen = false;
   let editUser: (typeof data.users)[number] | null = null;
   let q = '';
-  $: if (form?.ok && newOpen) newOpen = false;
-  $: if (form?.ok && editOpen) editOpen = false;
+  // Consumed-success token: `form.ok` persists after enhance, so dialogs close
+  // exactly once per success and can still be reopened afterwards.
+  let seenOk: unknown = null;
+  $: if (form?.ok && form !== seenOk) {
+    seenOk = form;
+    newOpen = false;
+    editOpen = false;
+  }
   $: filtered = data.users.filter(u => {
     const s = q.trim().toLowerCase();
     if (!s) return true;
@@ -47,7 +57,13 @@
           </div>
           <Button.Root class="grid h-8 w-8 place-items-center rounded-full bg-[var(--row)] border border-[var(--line)] text-[var(--dim)] hover:bg-[var(--row2)] hover:text-[var(--ink)]" onclick={() => newOpen = false} aria-label="Close">✕</Button.Root>
         </div>
-        <form method="POST" action="?/create" class="overflow-y-auto">
+        <form method="POST" action="?/create" class="overflow-y-auto" use:enhance={() => {
+          creating = true;
+          return async ({ update }) => {
+            creating = false;
+            await update();
+          };
+        }}>
           <div class="p-5 flex flex-col gap-3">
             <div class="input-group">
               <label class="field">
@@ -76,7 +92,7 @@
           </div>
           <div class="flex gap-2 border-t border-[var(--line-thin)] bg-[var(--row)]/50 px-5 pt-4" style="padding-bottom: max(16px, env(safe-area-inset-bottom));">
             <Button.Root type="button" class="flex-1 rounded-[10px] border border-[var(--line)] bg-[var(--row)] px-4 py-2.5 text-[15px] font-medium text-[var(--ink)] hover:bg-[var(--row2)]" onclick={() => newOpen = false}>Cancel</Button.Root>
-            <Button.Root type="submit" class="flex-1 rounded-[10px] bg-[var(--blue)] px-4 py-2.5 text-[15px] font-semibold text-white hover:bg-[var(--blue-press)]">Create user</Button.Root>
+            <Button.Root type="submit" class="flex-1 rounded-[10px] bg-[var(--blue)] px-4 py-2.5 text-[15px] font-semibold text-white hover:bg-[var(--blue-press)] disabled:opacity-40" disabled={creating}>{creating ? 'Creating…' : 'Create user'}</Button.Root>
           </div>
         </form>
         </div>
@@ -90,7 +106,7 @@
     <div class="err" role="alert">{form.error}</div>
   </div>
 {/if}
-{#if form?.ok}
+{#if form?.ok && !newOpen && !editOpen}
   <div class="form-section">
     <div class="rounded-[10px] border border-[color-mix(in_srgb,var(--green)_18%,transparent)] bg-[color-mix(in_srgb,var(--green)_10%,transparent)] px-4 py-3 text-[15px] text-[var(--green)]" role="status">Saved.</div>
   </div>
@@ -142,7 +158,13 @@
           <Button.Root class="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[var(--row)] border border-[var(--line)] text-[var(--dim)] hover:bg-[var(--row2)] hover:text-[var(--ink)]" onclick={() => editOpen = false} aria-label="Close">✕</Button.Root>
         </div>
         {#if editUser}
-          <form method="POST" action="?/edit" class="overflow-y-auto px-5 py-5 flex flex-col gap-4" style="padding-bottom: max(20px, env(safe-area-inset-bottom));">
+          <form method="POST" action="?/edit" class="overflow-y-auto px-5 py-5 flex flex-col gap-4" style="padding-bottom: max(20px, env(safe-area-inset-bottom));" use:enhance={() => {
+            savingEdit = true;
+            return async ({ update }) => {
+              savingEdit = false;
+              await update();
+            };
+          }}>
             <div class="input-group">
               <label class="field">
                 <span class="key">Display name</span>
@@ -167,7 +189,7 @@
             </div>
             <input type="hidden" name="id" value={editUser.id} />
             <div class="flex justify-end">
-              <Button.Root type="submit" class="filled !w-auto px-6">Save</Button.Root>
+              <Button.Root type="submit" class="filled !w-auto px-6" disabled={savingEdit}>{savingEdit ? 'Saving…' : 'Save'}</Button.Root>
             </div>
           </form>
         {/if}

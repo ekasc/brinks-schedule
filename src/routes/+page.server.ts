@@ -26,8 +26,11 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     techs = [{ id: locals.user.id, display_name: locals.user.display_name, username: locals.user.username, role: 'tech' as const }];
     allJobs = await listJobsSummary(todayStart.getTime() / 1000, tomorrowEnd.getTime() / 1000, locals.user.id);
   } else {
-    techs = await listUsers('tech');
-    allJobs = await listJobsSummary(todayStart.getTime() / 1000, tomorrowEnd.getTime() / 1000);
+    // Independent queries — one round trip instead of two.
+    [techs, allJobs] = await Promise.all([
+      listUsers('tech'),
+      listJobsSummary(todayStart.getTime() / 1000, tomorrowEnd.getTime() / 1000)
+    ]);
   }
 
   const myTechId = isTech ? locals.user.id : null;
