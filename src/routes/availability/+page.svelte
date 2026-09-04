@@ -27,11 +27,24 @@
   type DaySlot = { on: boolean; start: string; end: string };
   let daySlots: Record<number, DaySlot> = {};
   let initializedFor: number | null = null;
+  // Unsaved per-tech drafts: switching techs stashes edits instead of wiping them.
+  let drafts: Record<number, Record<number, DaySlot>> = {};
+  function snap(slots: Record<number, DaySlot>): Record<number, DaySlot> {
+    return JSON.parse(JSON.stringify(slots));
+  }
+  let confirmClear = false;
+  $: if (Object.values(daySlots).some((s) => s?.on)) confirmClear = false;
 
   function minToStr(m:number){ const h=Math.floor(m/60).toString().padStart(2,'0'); const mm=(m%60).toString().padStart(2,'0'); return `${h}:${mm}`; }
   function strToMin(s:string){ const [h,m]=s.split(':').map(Number); return h*60+m; }
 
   function initFromTemplates(){
+    const draft = drafts[selectedTech];
+    if (draft) {
+      daySlots = snap(draft);
+      initializedFor = selectedTech;
+      return;
+    }
     const next: Record<number, DaySlot> = {};
     for (const d of DAYS) next[d.dow] = { on: false, start: '09:00', end: '17:00' };
     const avail = templates;
@@ -70,17 +83,18 @@
     }
     // Allow all-off (empty) to explicitly mark the week as not working.
     // Do not default to Mon-Fri; empty means no availability.
-    if (!patterns.length) {
-      // Confirm with user that they want to clear all hours.
-      if (!confirm('Save with no days enabled? This will make you unavailable for all bookings.')) return;
+    if (!patterns.length && !confirmClear) {
+      confirmClear = true;
+      return;
     }
+    confirmClear = false;
     saving=true;
     try{
       const fd=new FormData();
       fd.set('tech_id', String(selectedTech));
       fd.set('patterns', JSON.stringify(patterns));
       const res=await fetch('?/savePatterns', {method:'POST', body:fd});
-      if (res.ok){ saveOk=true; setTimeout(()=>saveOk=false,1500); await invalidateAll(); initializedFor=null; }
+      if (res.ok){ saveOk=true; setTimeout(()=>saveOk=false,1500); await invalidateAll(); delete drafts[selectedTech]; initializedFor=null; }
       else {
         const txt=await res.text();
         try{
@@ -109,7 +123,7 @@
     <div class="input-group">
       <label class="field">
         <span class="key">Technician</span>
-        <Select.Root type="single" value={String(selectedTech)} onValueChange={(v)=>{ if(v!=null) { selectedTech=Number(v); initializedFor=null; } }} items={availTechItems}>
+        <Select.Root type="single" value={String(selectedTech)} onValueChange={(v)=>{ if(v!=null) { const id=Number(v); if (id!==selectedTech) { if (Object.keys(daySlots).length) drafts[selectedTech]=snap(daySlots); selectedTech=id; initializedFor=null; } } }} items={availTechItems}>
           <Select.Trigger class="{inpc} flex cursor-pointer items-center justify-between text-left data-[placeholder]:!text-[var(--dim)]" aria-label="Technician"><Select.Value placeholder="Technician" /><svg width="12" height="8" viewBox="0 0 12 8" fill="none" aria-hidden="true" class="ml-2 shrink-0 text-[var(--dim)]"><path d="M1 1.5L6 6.5L11 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></Select.Trigger>
           <Select.Portal>
             <Select.Content class="z-[1000] min-w-[220px] w-[var(--bits-floating-anchor-width)] max-w-[92vw] rounded-[10px] border border-[var(--line)] bg-[var(--row)] p-1 text-[var(--ink)] shadow-xl" sideOffset={6}>
@@ -153,9 +167,18 @@
       </div>
     {/each}
   </div>
-  <div class="mt-3 flex items-center gap-3">
+  <div class="mt-3 flex flex-wrap items-center gap-3">
+    {#if data.canSave}
     <Button.Root class="filled !w-auto px-6 disabled:opacity-30" onclick={saveHours} disabled={saving}>{saving?'Saving…':'Save'}</Button.Root>
+    {#if confirmClear}
+      <span class="text-[13px] text-[var(--ink)]">No days on — tech becomes unbookable.</span>
+      <Button.Root class="rounded-[10px] bg-amber-500 px-4 py-2 text-[14px] font-semibold text-white hover:bg-amber-600" onclick={saveHours} disabled={saving}>Save anyway</Button.Root>
+      <Button.Root class="rounded-[10px] border border-[var(--line)] bg-[var(--row)] px-4 py-2 text-[14px] font-medium text-[var(--ink)] hover:bg-[var(--row2)]" onclick={() => (confirmClear = false)} disabled={saving}>Keep editing</Button.Root>
+    {/if}
     {#if saveOk}<span class="text-[13px] text-[var(--green)]">Saved</span>{/if}
     {#if saveErr}<span class="text-[13px] text-[var(--red)]" role="alert">{saveErr}</span>{/if}
+    {:else}
+    <span class="text-[13px] text-[var(--dim)]">Hours are set by technicians — this view is read-only.</span>
+    {/if}
   </div>
 </div>

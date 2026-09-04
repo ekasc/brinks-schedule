@@ -1,7 +1,7 @@
 // Availability / scheduling policy — single source of truth for buffer.
 //
 // Invariant: A booking is admissible iff it lies within an available interval
-// and is at least BUFFER_MIN clear of every other non-cancelled job.
+// and is at least BUFFER_MIN clear of every other active (non-cancelled, non-declined) job.
 // Enforced both in slot generation (getAvailableSlots expands jobs by
 // BUFFER_MIN) and atomically at the mutation boundary (createJob /
 // hasNonCancelledOverlap / __setJobStatusConditional use BUFFER_SEC in their

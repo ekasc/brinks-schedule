@@ -21,7 +21,7 @@
   <div class="flex-1">
     <input class="w-full rounded-[10px] border border-[var(--line)] bg-[var(--row)] px-3 py-2.5 text-[15px] text-[var(--ink)] outline-none placeholder:text-[var(--dim)]" bind:value={query} placeholder="Search client or address" aria-label="Search client or address" />
   </div>
-  <a href="/calendar" class="inline-flex shrink-0 items-center justify-center rounded-[10px] border border-[var(--line)] bg-[var(--row)] px-4 text-[15px] font-medium text-[var(--ink)] hover:bg-[var(--row2)]">Past 7 days</a>
+  <a href="/calendar" class="inline-flex shrink-0 items-center justify-center rounded-[10px] border border-[var(--line)] bg-[var(--row)] px-4 text-[15px] font-medium text-[var(--ink)] hover:bg-[var(--row2)]">Week</a>
 </div>
 {#if visible.length === 0}
   <div class="empty"><h3>{query ? 'No matching jobs' : 'No jobs scheduled'}</h3><div>{query ? 'Try another search.' : 'Booked jobs will show here as the day unfolds.'}</div>{#if data.isSales}<div class="hint"><a href="/book">Book a job →</a></div>{/if}</div>

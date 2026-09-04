@@ -41,7 +41,7 @@ jobs:
         run: pnpm check
 
       - name: Unit tests
-        run: pnpm exec vitest run --exclude tests/e2e
+        run: pnpm test
 
       - name: Build
         run: pnpm build

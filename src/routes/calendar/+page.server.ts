@@ -1,14 +1,7 @@
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
 import { findUserById, listActiveUsers, listJobsSummary } from '$lib/server/db';
-import { parseWeekOffset } from '$lib/server/weekOffset';
-
-function startOfWeek(d: Date): Date {
-  const x = new Date(d); x.setHours(0,0,0,0);
-  const dow = x.getDay();
-  x.setDate(x.getDate() - dow);
-  return x;
-}
+import { parseWeekOffset, startOfDayLocal } from '$lib/server/weekOffset';
 
 export const load: PageServerLoad = async ({ locals, url }) => {
   if (!locals.user) throw redirect(302, '/login');
@@ -16,7 +9,8 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   const isTech = locals.user.role === 'tech';
   if (isTech) {
     const offsetWeeks = parseWeekOffset(url.searchParams.get('w'));
-    const base = startOfWeek(new Date());
+    // Techs see a rolling 7 days from today, not Sun–Sat.
+    const base = startOfDayLocal(new Date());
     base.setDate(base.getDate() + offsetWeeks * 7);
     const startTs = Math.floor(base.getTime() / 1000);
     const endDate = new Date(base); endDate.setDate(endDate.getDate() + 7);
@@ -33,7 +27,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
         iso: d.toISOString().slice(0, 10),
         date: d,
         techs: techs.map((t) => {
-          const jobs = weekJobs.filter((j) => j.tech_id === t.id && j.status !== 'cancelled' && j.starts_at < dayEnd && j.ends_at > dayStart).sort((a, b) => a.starts_at - b.starts_at);
+          const jobs = weekJobs.filter((j) => j.tech_id === t.id && j.status !== 'cancelled' && j.status !== 'declined' && j.starts_at < dayEnd && j.ends_at > dayStart).sort((a, b) => a.starts_at - b.starts_at);
           return { techId: t.id, techName: t.display_name, jobs };
         })
       });
@@ -41,17 +35,21 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     return { techs, days, weekStartIso: base.toISOString(), offsetWeeks };
   }
 
-  const activeTechs = await listActiveUsers('tech');
+  const activeTechsPromise = listActiveUsers('tech');
   const offsetWeeks = parseWeekOffset(url.searchParams.get('w'));
-  const base = startOfWeek(new Date());
+  const base = startOfDayLocal(new Date());
   base.setDate(base.getDate() + offsetWeeks * 7);
   const startTs = Math.floor(base.getTime() / 1000);
   const endDate = new Date(base); endDate.setDate(endDate.getDate() + 7);
   const endTs = Math.floor(endDate.getTime() / 1000);
 
-  const weekJobs = (await listJobsSummary(startTs, endTs)) as any[];
+  // Independent queries — one round trip instead of two.
+  const [activeTechs, weekJobs] = await Promise.all([
+    activeTechsPromise,
+    listJobsSummary(startTs, endTs) as Promise<any[]>
+  ]);
   const activeIds = new Set(activeTechs.map((t) => t.id));
-  const extraTechIds = [...new Set(weekJobs.filter((j) => j.status !== 'cancelled').map((j) => j.tech_id as number))].filter((id) => !activeIds.has(id));
+  const extraTechIds = [...new Set(weekJobs.filter((j) => j.status !== 'cancelled' && j.status !== 'declined').map((j) => j.tech_id as number))].filter((id) => !activeIds.has(id));
   const extraTechs = (
     await Promise.all(extraTechIds.map((id) => findUserById(id)))
   ).filter((u): u is NonNullable<typeof u> => !!u);
@@ -67,7 +65,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
       iso: d.toISOString().slice(0, 10),
       date: d,
       techs: techs.map((t) => {
-        const jobs = weekJobs.filter((j) => j.tech_id === t.id && j.status !== 'cancelled' && j.starts_at < dayEnd && j.ends_at > dayStart).sort((a, b) => a.starts_at - b.starts_at);
+        const jobs = weekJobs.filter((j) => j.tech_id === t.id && j.status !== 'cancelled' && j.status !== 'declined' && j.starts_at < dayEnd && j.ends_at > dayStart).sort((a, b) => a.starts_at - b.starts_at);
         return { techId: t.id, techName: t.display_name, jobs };
       })
     });

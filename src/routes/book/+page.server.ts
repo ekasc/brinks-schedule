@@ -3,7 +3,7 @@ import { superValidate } from 'sveltekit-superforms/server';
 import { zod4 } from 'sveltekit-superforms/adapters';
 import type { Actions, PageServerLoad } from './$types';
 import { bookJobSchema } from '$lib/schemas/book';
-import { listActiveUsers, createJob, getAvailableSlots, getAvailableSlotsForDurationsForTechs, SLOT_HORIZON_DAYS } from '$lib/server/db';
+import { listActiveUsers, createJob, findUserById, getAvailableSlots, getAvailableSlotsForDurationsForTechs, SLOT_HORIZON_DAYS } from '$lib/server/db';
 import { geocode } from '$lib/server/geocode';
 import { normalizeDuration, normalizeTechSelection } from '$lib/server/bookingSelection';
 import { notifyJobCreated } from '$lib/server/notifications';
@@ -49,6 +49,11 @@ export const actions: Actions = {
     const startsAt = parseTs(value.starts_at) ?? 0;
     const endsAt = parseTs(value.ends_at) ?? 0;
     if (!startsAt || !endsAt) return fail(400, { form, error: 'Invalid time slot.' });
+    // The form only lists active techs — recheck server-side so a deactivated
+    // tech (or forged id) with leftover hours can't accept new bookings.
+    const tech = await findUserById(value.tech_id);
+    if (!tech || tech.role !== 'tech' || tech.is_active !== 1)
+      return fail(400, { form, error: 'That technician is not available.' });
     // Reproduce the slot using the actual selected duration; getAvailableSlots defaults to
     // 90-min slots, so a 60/120-min selection would never match and be wrongly rejected.
     const durationMin = Math.max(1, Math.round((endsAt - startsAt) / 60));

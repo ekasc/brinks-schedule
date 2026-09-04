@@ -35,7 +35,7 @@
 <div class="group">
   <div class="group-title">You · {data.user.display_name}</div>
   <div class="group-rows">
-    <div class="row-line"><span class="label">Your jobs</span><span class="value">{data.me.total} total · {data.me.signed} signed · {data.me.sent} sent · {data.me.cancelled} cancelled</span></div>
+    <div class="row-line"><span class="label">Your jobs</span><span class="value">{data.me.total} total · {data.me.signed} signed · {data.me.sent} sent · {data.me.cancelled} cancelled · {data.me.declined ?? 0} declined</span></div>
     <div class="row-line"><span class="label">Completed</span><span class="value">{data.me.completed} · {fmtCents(data.me.completed_cents)}</span></div>
     <div class="row-line"><span class="label">Earned (signed)</span><span class="value ink">{fmtCents(data.me.earned_cents)}</span></div>
     <div class="row-line"><span class="label">Pending (sent)</span><span class="value">{fmtCents(data.me.pending_cents)}</span></div>

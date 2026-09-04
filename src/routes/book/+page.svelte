@@ -6,6 +6,7 @@
   import { Select, Button, Calendar, Popover } from 'bits-ui';
   import { CalendarDate, parseDate, today, getLocalTimeZone } from '@internationalized/date';
   import { cubicOut } from 'svelte/easing';
+  import { localIsoDay, localIsoTomorrow } from '$lib/dashboardView';
   import { onMount } from 'svelte';
   import type { PageData, ActionData } from './$types';
   export let data: PageData;
@@ -82,8 +83,8 @@
     return Array.from(map.entries()).sort();
   })();
 
-  $: todayIso = new Date().toISOString().slice(0, 10);
-  $: tomorrowIso = (() => { const d=new Date(); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); })();
+  $: todayIso = localIsoDay();
+  $: tomorrowIso = localIsoTomorrow();
   function isTomorrow(iso:string){ return iso===tomorrowIso; }
   let timeView: 'list' | 'calendar' = 'calendar';
   let calCursor: Date = new Date();
@@ -253,7 +254,10 @@
   </div>
 {/if}
 
-<form method="POST" use:enhance novalidate class="pb-8">
+<form method="POST" use:enhance={{
+  onSubmit: () => { busy = true; },
+  onResult: () => { busy = false; }
+}} novalidate class="pb-8">
   <!-- Customer -->
   <div id="sec-customer" class="group scroll-mt-24">
     <div class="group-title">Customer</div>

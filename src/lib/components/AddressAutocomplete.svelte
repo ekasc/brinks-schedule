@@ -22,6 +22,9 @@
   let suggestions: Suggestion[] = [];
   let active = -1;
   let debounce: ReturnType<typeof setTimeout> | undefined;
+  // Sequence guard: overlapping geocode responses resolve out of order —
+  // only the latest query may update the list.
+  let seq = 0;
 
   function onChange() {
     active = -1;
@@ -38,17 +41,21 @@
   }
 
   async function fetchSuggestions() {
+    const my = ++seq;
+    const q = value.trim();
     loading = true;
     try {
-      const res = await fetch(`/api/geocode?q=${encodeURIComponent(value.trim())}&limit=5`);
+      const res = await fetch(`/api/geocode?q=${encodeURIComponent(q)}&limit=5`);
       const out = await res.json();
+      if (my !== seq) return;
       suggestions = out.suggestions ?? [];
       open = suggestions.length > 0;
     } catch {
+      if (my !== seq) return;
       suggestions = [];
       open = false;
     } finally {
-      loading = false;
+      if (my === seq) loading = false;
     }
   }
 
@@ -131,6 +138,8 @@
         align="start"
         avoidCollisions={true}
         collisionPadding={8}
+        id="addr-listbox"
+        role="listbox"
       >
         {#if loading}<span class="block px-3 py-2.5 text-[13px] text-[var(--dim)]">Searching…</span>{/if}
         {#each suggestions as s, i}
@@ -183,6 +192,8 @@
         align="start"
         avoidCollisions={true}
         collisionPadding={8}
+        id="addr-listbox"
+        role="listbox"
       >
         {#if loading}<span class="block px-3 py-2.5 text-[13px] text-[var(--dim)]">Searching…</span>{/if}
         {#each suggestions as s, i}

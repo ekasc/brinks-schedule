@@ -94,7 +94,18 @@ type D1 = {
 };
 
 // Schema lives in Node-safe schema.ts so both db.ts and E2E global-setup share one source.
-import { SCHEMA, initializeSqliteSchema } from './schema';
+import { SCHEMA, initializeSqliteSchema, jobsNeedsDeclinedMigration, buildJobsDeclinedMigration } from './schema';
+
+async function migrateJobsDeclinedD1(d1: D1): Promise<void> {
+  const row: any = await d1.prepare(`SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'`).bind().first();
+  if (!jobsNeedsDeclinedMigration(row?.sql)) return;
+  const info: any = await d1.prepare(`PRAGMA table_info(jobs)`).bind().all();
+  const results = Array.isArray(info) ? info : (info?.results ?? []);
+  const cols = results.map((c: any) => c?.name).filter((n: any) => typeof n === 'string');
+  const stmts = buildJobsDeclinedMigration(row.sql, cols);
+  if (!stmts) throw new Error('unrecognized jobs DDL, aborting');
+  await d1.exec(stmts.join('\n'));
+}
 let _schemaReady: Promise<void> | null = null;
 function ensureSchemaOnce(): Promise<void> {
   if (!_schemaReady) {
@@ -106,6 +117,7 @@ function ensureSchemaOnce(): Promise<void> {
           try { await d1.exec(`ALTER TABLE jobs ADD COLUMN ${col}`); } catch {}
         }
         try { await d1.exec(`ALTER TABLE users ADD COLUMN session_version INTEGER NOT NULL DEFAULT 1`); } catch {}
+        try { await migrateJobsDeclinedD1(d1); } catch (e) { console.warn('[db] jobs declined migration skipped:', (e as Error)?.message ?? e); }
       }
     })();
   }
@@ -199,7 +211,7 @@ function getMutationMeta(r: any): { changes: number; lastId: number } {
 // re-export types
 export interface User { id: number; username: string; role: 'admin'|'sales'|'tech'; display_name: string; is_active?: number; session_version?: number; last_login?: number|null; password_hash?: string; }
 export interface AvailabilityTemplate { id: number; tech_id: number; dow: number; start_min: number; end_min: number; note: string|null; }
-export interface Job { id: number; tech_id: number; booked_by: number; client_name: string; address: string; street: string|null; city: string|null; province: string|null; postal_code: string|null; lat: number|null; lng: number|null; starts_at: number; ends_at: number; status: 'sent'|'signed'|'cancelled'; completed_at: number|null; notes: string|null; email: string|null; dob: string|null; telus_pin: string|null; id_type: string|null; id_last4: string|null; emergency_name: string|null; emergency_number: string|null; emergency_relation: string|null; verbal_password: string|null; svc_internet: number; svc_internet_detail: string|null; svc_home_phone: number; svc_home_phone_detail: string|null; svc_tv: number; svc_tv_detail: string|null; themes: string|null; security_offered: string|null; phone: string|null; price_cents: number; payout_cents: number; created_at?: number; updated_at?: number; _decryptFailed?: string[]; }
+export interface Job { id: number; tech_id: number; booked_by: number; client_name: string; address: string; street: string|null; city: string|null; province: string|null; postal_code: string|null; lat: number|null; lng: number|null; starts_at: number; ends_at: number; status: 'sent'|'signed'|'cancelled'|'declined'; completed_at: number|null; notes: string|null; email: string|null; dob: string|null; telus_pin: string|null; id_type: string|null; id_last4: string|null; emergency_name: string|null; emergency_number: string|null; emergency_relation: string|null; verbal_password: string|null; svc_internet: number; svc_internet_detail: string|null; svc_home_phone: number; svc_home_phone_detail: string|null; svc_tv: number; svc_tv_detail: string|null; themes: string|null; security_offered: string|null; phone: string|null; price_cents: number; payout_cents: number; created_at?: number; updated_at?: number; _decryptFailed?: string[]; }
 export interface JobWithTech extends Job { tech_name: string; booker_name: string; }
 export type JobSummary = Pick<Job, 'id'|'tech_id'|'booked_by'|'client_name'|'address'|'street'|'city'|'province'|'postal_code'|'lat'|'lng'|'starts_at'|'ends_at'|'status'|'completed_at'|'notes'|'email'|'svc_internet'|'svc_internet_detail'|'svc_home_phone'|'svc_home_phone_detail'|'svc_tv'|'svc_tv_detail'|'themes'|'security_offered'|'price_cents'|'payout_cents'|'created_at'|'updated_at'> & { tech_name: string; booker_name: string; };
 
@@ -318,8 +330,8 @@ function availabilitySqlExists(techIdParam: string, startsParam: string, endsPar
 
 export async function hasNonCancelledOverlap(techId: number, startsAt: number, endsAt: number, excludeId?: number): Promise<boolean> {
   const row = excludeId != null
-    ? await d1Get(`SELECT id FROM jobs WHERE tech_id = ? AND id != ? AND status != 'cancelled' AND starts_at < ? AND ends_at > ? LIMIT 1`, techId, excludeId, endsAt + BUFFER_SEC, startsAt - BUFFER_SEC)
-    : await d1Get(`SELECT id FROM jobs WHERE tech_id = ? AND status != 'cancelled' AND starts_at < ? AND ends_at > ? LIMIT 1`, techId, endsAt + BUFFER_SEC, startsAt - BUFFER_SEC);
+    ? await d1Get(`SELECT id FROM jobs WHERE tech_id = ? AND id != ? AND status NOT IN ('cancelled','declined') AND starts_at < ? AND ends_at > ? LIMIT 1`, techId, excludeId, endsAt + BUFFER_SEC, startsAt - BUFFER_SEC)
+    : await d1Get(`SELECT id FROM jobs WHERE tech_id = ? AND status NOT IN ('cancelled','declined') AND starts_at < ? AND ends_at > ? LIMIT 1`, techId, endsAt + BUFFER_SEC, startsAt - BUFFER_SEC);
   return !!row;
 }
 
@@ -331,7 +343,7 @@ export async function createJob(j: NewJob): Promise<{id:number}|{conflict:'tech_
   if (j.ends_at > j.starts_at && eMin===0 && eParts.hour===0 && eParts.minute===0) eMin = 1440;
   const availExists = availabilitySqlExistsForConstants(j.tech_id, dow, sMin, eMin);
   const sameDateCond = sameLocalDate(j.starts_at, j.ends_at) ? '1' : '0';
-  const r:any = await d1Run(`INSERT INTO jobs (tech_id, booked_by, client_name, address, street, city, province, postal_code, lat, lng, starts_at, ends_at, notes, email, dob, telus_pin, id_type, id_last4, emergency_name, emergency_number, emergency_relation, verbal_password, svc_internet, svc_internet_detail, svc_home_phone, svc_home_phone_detail, svc_tv, svc_tv_detail, themes, security_offered, phone, price_cents, payout_cents) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${sameDateCond}=1 AND ${availExists} AND NOT EXISTS (SELECT 1 FROM jobs WHERE tech_id = ? AND status != 'cancelled' AND starts_at < ? AND ends_at > ?)`, 
+  const r:any = await d1Run(`INSERT INTO jobs (tech_id, booked_by, client_name, address, street, city, province, postal_code, lat, lng, starts_at, ends_at, notes, email, dob, telus_pin, id_type, id_last4, emergency_name, emergency_number, emergency_relation, verbal_password, svc_internet, svc_internet_detail, svc_home_phone, svc_home_phone_detail, svc_tv, svc_tv_detail, themes, security_offered, phone, price_cents, payout_cents) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${sameDateCond}=1 AND ${availExists} AND NOT EXISTS (SELECT 1 FROM jobs WHERE tech_id = ? AND status NOT IN ('cancelled','declined') AND starts_at < ? AND ends_at > ?)`, 
     j.tech_id, j.booked_by, j.client_name, j.address, (j.street ?? null) ? String(j.street).trim() : null, (j.city ?? null) ? String(j.city).trim() : null, (j.province ?? null) ? String(j.province).trim().toUpperCase() : null, (j.postal_code ?? null) ? String(j.postal_code).trim().toUpperCase() : null, j.lat ?? null, j.lng ?? null, j.starts_at, j.ends_at, j.notes ?? null, j.email ?? null, encryptField(j.dob ?? null), encryptField(j.telus_pin ?? null), j.id_type ?? null, encryptField(j.id_last4 ?? null), encryptField(j.emergency_name ?? null), encryptField(j.emergency_number ?? null), encryptField(j.emergency_relation ?? null), encryptField(j.verbal_password ?? null), j.svc_internet?1:0, j.svc_internet_detail ?? null, j.svc_home_phone?1:0, j.svc_home_phone_detail ?? null, j.svc_tv?1:0, j.svc_tv_detail ?? null, j.themes ?? null, j.security_offered ?? null, j.phone ?? null, j.price_cents ?? 0, j.payout_cents ?? 0,
     j.tech_id, j.ends_at + BUFFER_SEC, j.starts_at - BUFFER_SEC);
   const { changes, lastId } = getMutationMeta(r);
@@ -352,9 +364,9 @@ export async function getJobRaw(id: number){ return await d1Get(`SELECT j.*, t.d
 export async function updateJob(id: number, patch: any, actorId?: number): Promise<{ok:true}|{conflict:string}>{
   const existing: any = await getJobRaw(id); if (!existing) return { conflict: 'not found' };
   const nextTech = patch.tech_id ?? existing.tech_id; const nextStart = patch.starts_at ?? existing.starts_at; const nextEnd = patch.ends_at ?? existing.ends_at;
-  const willBeNonCancelled = existing.status !== 'cancelled';
+  const willBeNonCancelled = existing.status === 'sent' || existing.status === 'signed';
   const isSchedulingChange = (patch.tech_id!=null || patch.starts_at!=null || patch.ends_at!=null) && willBeNonCancelled;
-  const map: Record<string,string> = { tech_id:'tech_id', client_name:'client_name', address:'address', street:'street', city:'city', province:'province', postal_code:'postal_code', starts_at:'starts_at', ends_at:'ends_at', notes:'notes', email:'email', dob:'dob', telus_pin:'telus_pin', id_type:'id_type', id_last4:'id_last4', emergency_name:'emergency_name', emergency_number:'emergency_number', emergency_relation:'emergency_relation', verbal_password:'verbal_password', themes:'themes', security_offered:'security_offered', payout_cents:'payout_cents', svc_internet_detail:'svc_internet_detail', svc_home_phone_detail:'svc_home_phone_detail', svc_tv_detail:'svc_tv_detail'};
+  const map: Record<string,string> = { tech_id:'tech_id', client_name:'client_name', address:'address', street:'street', city:'city', province:'province', postal_code:'postal_code', starts_at:'starts_at', ends_at:'ends_at', notes:'notes', email:'email', dob:'dob', telus_pin:'telus_pin', id_type:'id_type', id_last4:'id_last4', emergency_name:'emergency_name', emergency_number:'emergency_number', emergency_relation:'emergency_relation', verbal_password:'verbal_password', themes:'themes', security_offered:'security_offered', phone:'phone', price_cents:'price_cents', payout_cents:'payout_cents', svc_internet_detail:'svc_internet_detail', svc_home_phone_detail:'svc_home_phone_detail', svc_tv_detail:'svc_tv_detail'};
   const fields:string[]=[]; const vals:any={};
   for (const [k,col] of Object.entries(map)){
     if ((patch as any)[k]!==undefined){
@@ -379,7 +391,7 @@ export async function updateJob(id: number, patch: any, actorId?: number): Promi
     if (nextEnd > nextStart && eMin2===0 && eParts2.hour===0 && eParts2.minute===0) eMin2 = 1440;
     const sameDateOk = sameLocalDate(nextStart, nextEnd) ? '1' : '0';
     const availExists2 = availabilitySqlExistsForConstants(nextTech, dow2, sMin2, eMin2);
-    const sql = `UPDATE jobs SET ${fields.join(', ')} WHERE id = ? AND ${sameDateOk}=1 AND ${availExists2} AND NOT EXISTS (SELECT 1 FROM jobs WHERE tech_id = ? AND id != ? AND status != 'cancelled' AND starts_at < ? AND ends_at > ?)`;
+    const sql = `UPDATE jobs SET ${fields.join(', ')} WHERE id = ? AND ${sameDateOk}=1 AND ${availExists2} AND NOT EXISTS (SELECT 1 FROM jobs WHERE tech_id = ? AND id != ? AND status NOT IN ('cancelled','declined') AND starts_at < ? AND ends_at > ?)`;
     const r:any = await d1Run(sql, ...allParams, id, nextTech, id, nextEnd + BUFFER_SEC, nextStart - BUFFER_SEC);
     const { changes } = getMutationMeta(r);
     if (changes === 0) {
@@ -424,7 +436,7 @@ export async function searchJobs(q: string, fromTs?: number, toTs?: number, tech
 export async function __setJobStatusConditional(id: number, status: string, expectedStatus: string): Promise<number> {
   // Availability is checked in JS (Vancouver-aware) by caller when needed; keep SQL atomic only for overlap + status predicate.
   const r:any = await d1Run(
-    `UPDATE jobs SET status = ?, updated_at = unixepoch() WHERE id = ? AND status = ? AND NOT EXISTS (SELECT 1 FROM jobs AS other WHERE other.tech_id = jobs.tech_id AND other.id != jobs.id AND other.status != 'cancelled' AND other.starts_at < jobs.ends_at + ${BUFFER_SEC} AND other.ends_at > jobs.starts_at - ${BUFFER_SEC})`,
+    `UPDATE jobs SET status = ?, updated_at = unixepoch() WHERE id = ? AND status = ? AND NOT EXISTS (SELECT 1 FROM jobs AS other WHERE other.tech_id = jobs.tech_id AND other.id != jobs.id AND other.status NOT IN ('cancelled','declined') AND other.starts_at < jobs.ends_at + ${BUFFER_SEC} AND other.ends_at > jobs.starts_at - ${BUFFER_SEC})`,
     status, id, expectedStatus
   );
   return getMutationMeta(r).changes;
@@ -435,7 +447,7 @@ export async function setJobStatus(id: number, status: string, actorId?: number)
   const before:any = await d1Get(`SELECT * FROM jobs WHERE id=?`, id);
   if (!before) return { conflict: 'not found' };
   if (status === before.status) return { ok:true };
-  const isActivating = before.status === 'cancelled' && (status === 'sent' || status === 'signed');
+  const isActivating = (before.status === 'cancelled' || before.status === 'declined') && (status === 'sent' || status === 'signed');
   const needsOverlap = (status === 'sent' || status === 'signed');
   if (needsOverlap) {
     let changes = 0;
@@ -447,7 +459,7 @@ export async function setJobStatus(id: number, status: string, actorId?: number)
       if (before.ends_at > before.starts_at && eMin===0 && eParts.hour===0 && eParts.minute===0) eMin = 1440;
       const sameDateOk = sameLocalDate(before.starts_at, before.ends_at) ? '1' : '0';
       const availExists = availabilitySqlExistsForConstants(before.tech_id, dow, sMin, eMin);
-      const r:any = await d1Run(`UPDATE jobs SET status = ?, updated_at = unixepoch() WHERE id = ? AND status = ? AND ${sameDateOk}=1 AND ${availExists} AND NOT EXISTS (SELECT 1 FROM jobs AS other WHERE other.tech_id = jobs.tech_id AND other.id != jobs.id AND other.status != 'cancelled' AND other.starts_at < jobs.ends_at + ${BUFFER_SEC} AND other.ends_at > jobs.starts_at - ${BUFFER_SEC})`, status, id, before.status);
+      const r:any = await d1Run(`UPDATE jobs SET status = ?, updated_at = unixepoch() WHERE id = ? AND status = ? AND ${sameDateOk}=1 AND ${availExists} AND NOT EXISTS (SELECT 1 FROM jobs AS other WHERE other.tech_id = jobs.tech_id AND other.id != jobs.id AND other.status NOT IN ('cancelled','declined') AND other.starts_at < jobs.ends_at + ${BUFFER_SEC} AND other.ends_at > jobs.starts_at - ${BUFFER_SEC})`, status, id, before.status);
       changes = getMutationMeta(r).changes;
     } else {
       changes = await __setJobStatusConditional(id, status, before.status);
@@ -461,7 +473,7 @@ export async function setJobStatus(id: number, status: string, actorId?: number)
       return { conflict: 'That tech is already booked at that time.' };
     }
   } else {
-    const r:any = await d1Run(`UPDATE jobs SET status = ?, updated_at = unixepoch() WHERE id = ? AND status = ?`, status, id, before.status);
+    const r:any = await d1Run(`UPDATE jobs SET status = ?, completed_at = CASE WHEN ? IN ('cancelled','declined') THEN NULL ELSE completed_at END, updated_at = unixepoch() WHERE id = ? AND status = ?`, status, status, id, before.status);
     const { changes } = getMutationMeta(r);
     if (changes === 0) {
       const cur:any = await d1Get(`SELECT * FROM jobs WHERE id = ?`, id);
@@ -473,8 +485,15 @@ export async function setJobStatus(id: number, status: string, actorId?: number)
   await d1Run(`INSERT INTO job_events (job_id, actor_id, kind, from_val, to_val) VALUES (?, ?, 'status', ?, ?)`, id, actorId ?? null, before?.status ?? null, status);
   return { ok:true };
 }
-export async function setJobCompleted(id: number, completed_at: number|null, actorId?: number){ await d1Run(`UPDATE jobs SET completed_at = ?, updated_at = unixepoch() WHERE id = ?`, completed_at, id); await d1Run(`INSERT INTO job_events (job_id, actor_id, kind, to_val) VALUES (?, ?, ?, ?)`, id, actorId ?? null, completed_at?'completed':'reopened', String(completed_at ?? '')); }
-export async function setJobCoords(id: number, lat: number, lng: number, actorId?: number){ await d1Run(`UPDATE jobs SET lat = ?, lng = ?, updated_at = unixepoch() WHERE id = ?`, lat, lng, id); if (actorId) await d1Run(`INSERT INTO job_events (job_id, actor_id, kind, to_val) VALUES (?, ?, 'coords', ?)`, id, actorId, `${lat},${lng}`); }
+export async function setJobCompleted(id: number, completed_at: number|null, actorId?: number): Promise<{ok:true}|{conflict:string}>{
+  const cur:any = await d1Get(`SELECT status FROM jobs WHERE id = ?`, id);
+  if (!cur) return { conflict: 'not found' };
+  if (cur.status !== 'signed') return { conflict: 'Only signed jobs can be marked complete.' };
+  await d1Run(`UPDATE jobs SET completed_at = ?, updated_at = unixepoch() WHERE id = ?`, completed_at, id);
+  await d1Run(`INSERT INTO job_events (job_id, actor_id, kind, to_val) VALUES (?, ?, ?, ?)`, id, actorId ?? null, completed_at?'completed':'reopened', String(completed_at ?? ''));
+  return { ok:true };
+}
+export async function setJobCoords(id: number, lat: number | null, lng: number | null, actorId?: number){ await d1Run(`UPDATE jobs SET lat = ?, lng = ?, updated_at = unixepoch() WHERE id = ?`, lat, lng, id); if (actorId) await d1Run(`INSERT INTO job_events (job_id, actor_id, kind, to_val) VALUES (?, ?, 'coords', ?)`, id, actorId, `${lat},${lng}`); }
 export async function listJobEvents(jobId: number){ return await d1All(`SELECT e.*, u.display_name as actor_name FROM job_events e LEFT JOIN users u ON u.id=e.actor_id WHERE e.job_id=? ORDER BY e.created_at DESC`, jobId) as any[]; }
 export async function logPiiAccess(jobId: number, accessorId: number){ await d1Run(`INSERT INTO pii_access_log (job_id, accessor_id) VALUES (?, ?)`, jobId, accessorId); }
 export async function listPiiAccess(jobId: number){ return await d1All(`SELECT l.*, u.display_name FROM pii_access_log l JOIN users u ON u.id=l.accessor_id WHERE l.job_id=? ORDER BY l.created_at DESC LIMIT 20`, jobId) as any; }
@@ -491,6 +510,21 @@ export async function listNotifications(userId:number, limit:number, beforeId?:n
 export async function countUnreadNotifications(userId:number){ const r:any=await d1Get(`SELECT COUNT(*) c FROM notifications WHERE user_id=? AND read_at IS NULL`,userId); return Number(r?.c??0); }
 export async function markNotificationRead(id:number,userId:number){ const r:any=await d1Run(`UPDATE notifications SET read_at=COALESCE(read_at,unixepoch()) WHERE id=? AND user_id=?`,id,userId); return Number(r.changes??r.meta?.changes??0)>0; }
 export async function markAllNotificationsRead(userId:number){ const r:any=await d1Run(`UPDATE notifications SET read_at=unixepoch() WHERE user_id=? AND read_at IS NULL`,userId); return Number(r.changes??r.meta?.changes??0); }
+/** Delete read notifications older than maxAgeDays (and their deliveries —
+ *  D1 doesn't cascade). Unread rows are never touched. Keeps the
+ *  ever-growing daily/event tables bounded. */
+export async function pruneOldNotifications(maxAgeDays = 90): Promise<number> {
+  const cutoff = Math.floor(Date.now() / 1000) - Math.max(0, maxAgeDays) * 86400;
+  await d1Run(`DELETE FROM push_deliveries WHERE notification_id IN (SELECT id FROM notifications WHERE read_at IS NOT NULL AND created_at <= ?)`, cutoff);
+  const r:any = await d1Run(`DELETE FROM notifications WHERE read_at IS NOT NULL AND created_at <= ?`, cutoff);
+  return Number(r?.changes ?? r?.meta?.changes ?? r?.meta?.rows_written ?? 0);
+}
+
+/** Test seam: read the reconcile watermark (production code never needs it). */
+export async function __getNotificationWatermark(): Promise<number> {
+  const row: any = await d1Get(`SELECT started_at FROM notification_state WHERE id=1`);
+  return Number(row?.started_at ?? 0);
+}
 export async function upsertPushSubscription(userId:number,endpoint:string,p256dh:string,auth:string){
   await d1Run(`INSERT INTO push_subscriptions(user_id,endpoint,p256dh,auth) VALUES(?,?,?,?) ON CONFLICT(endpoint) DO UPDATE SET user_id=excluded.user_id,p256dh=excluded.p256dh,auth=excluded.auth,updated_at=unixepoch()`,userId,endpoint,p256dh,auth);
 }
@@ -511,12 +545,12 @@ export async function generateDailySummaryNotifications(fromTs:number,toTs:numbe
   const counts = new Map<number, number>();
   if (techIds.length){
     const ph = techIds.map(()=> '?').join(',');
-    const rows:any[] = await d1All(`SELECT tech_id as uid, COUNT(*) as c FROM jobs WHERE status!='cancelled' AND starts_at>=? AND starts_at<? AND tech_id IN (${ph}) GROUP BY tech_id`, fromTs, toTs, ...techIds);
+    const rows:any[] = await d1All(`SELECT tech_id as uid, COUNT(*) as c FROM jobs WHERE status NOT IN ('cancelled','declined') AND starts_at>=? AND starts_at<? AND tech_id IN (${ph}) GROUP BY tech_id`, fromTs, toTs, ...techIds);
     for (const r of rows) counts.set(Number(r.uid), Number(r.c));
   }
   if (salesIds.length){
     const ph = salesIds.map(()=> '?').join(',');
-    const rows:any[] = await d1All(`SELECT booked_by as uid, COUNT(*) as c FROM jobs WHERE status!='cancelled' AND starts_at>=? AND starts_at<? AND booked_by IN (${ph}) GROUP BY booked_by`, fromTs, toTs, ...salesIds);
+    const rows:any[] = await d1All(`SELECT booked_by as uid, COUNT(*) as c FROM jobs WHERE status NOT IN ('cancelled','declined') AND starts_at>=? AND starts_at<? AND booked_by IN (${ph}) GROUP BY booked_by`, fromTs, toTs, ...salesIds);
     for (const r of rows) counts.set(Number(r.uid), Number(r.c));
   }
   let created=0;
@@ -535,15 +569,19 @@ export async function reconcileJobNotifications(){
     for(const userId of new Set([event.tech_id,event.booked_by])){
       if(userId===event.actor_id) continue;
       const label=event.kind==='status'?`status changed to ${event.to_val}`:event.kind==='completed'?'marked complete':'reopened';
-      const id=await createNotification(userId,'Booking updated',`${event.client_name}: ${label}`,`/jobs/${event.job_id}`,`job:${event.job_id}:event:${event.kind}:${event.created_at}:${userId}`);
+      const id=await createNotification(userId,'Booking updated',`${event.client_name}: ${label}`,`/jobs/${event.job_id}`,`job:${event.job_id}:event:${event.kind}:${event.created_at}:${event.to_val ?? ''}:${userId}`);
       if(id) repaired++;
     }
   }
+  // Advance the watermark so every scan only covers the window since the last
+  // run (cron or status tap). Reprocessing is harmless anyway (INSERT OR IGNORE
+  // dedupe keys), but without this the scan grows with the whole DB lifetime.
+  await d1Run(`UPDATE notification_state SET started_at = unixepoch() WHERE id=1`);
   return repaired;
 }
 async function fetchAvailabilityRaw(techId: number, fromTs: number, toTs: number, buf: number){
   const templates = await listTemplates(techId);
-  const jobs = (await listJobsSummary(fromTs-buf, toTs+buf, techId)).filter((j:any)=>j.status!=='cancelled');
+  const jobs = (await listJobsSummary(fromTs-buf, toTs+buf, techId)).filter((j:any)=>j.status!=='cancelled' && j.status!=='declined');
   return { templates, jobs };
 }
 function buildSlotsForDurations(expanded: {starts_at:number; ends_at:number}[], blocked: {start:number; end:number}[], fromTs: number, toTs: number, step: number, durations: number[]): Record<number, {starts_at:number; ends_at:number}[]>{
@@ -618,7 +656,7 @@ export async function getAvailableSlotsForDurationsForTechs(techIds: number[], b
   const byTech: Record<number, Record<number, {starts_at:number; ends_at:number}[]>> = {};
   for (const techId of techIds){
     const templates = allTemplates.filter((t:any)=> t.tech_id===techId);
-    const jobs = allJobs.filter((j:any)=> j.tech_id===techId && j.status!=='cancelled');
+    const jobs = allJobs.filter((j:any)=> j.tech_id===techId && j.status!=='cancelled' && j.status!=='declined');
     const { expanded, blocked } = buildExpandedAndBlocked(templates, jobs, fromTs, toTs, buf);
     if (!expanded.length){ const perDur: Record<number,any>={}; for(const d of durations) perDur[d]=[]; byTech[techId]=perDur; continue; }
     byTech[techId] = buildSlotsForDurations(expanded, blocked, fromTs, toTs, step, durations);
@@ -705,7 +743,7 @@ export async function getIncomeForUser(userId: number, role: string, fromTs?: nu
   else if (role==='sales'){ where='booked_by = ?'; params.push(userId); }
   else { where='(tech_id = ? OR booked_by = ?)'; params.push(userId,userId); }
   if (fromTs!=null && toTs!=null){ where+=' AND starts_at >= ? AND starts_at < ?'; params.push(fromTs,toTs); }
-  return await d1Get(`SELECT COUNT(*) as total, SUM(CASE WHEN status='signed' THEN 1 ELSE 0 END) as signed, SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END) as sent, SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END) as cancelled, SUM(CASE WHEN completed_at IS NOT NULL THEN 1 ELSE 0 END) as completed, COALESCE(SUM(CASE WHEN status='signed' THEN payout_cents ELSE 0 END),0) as earned_cents, COALESCE(SUM(CASE WHEN status='sent' THEN payout_cents ELSE 0 END),0) as pending_cents, COALESCE(SUM(CASE WHEN completed_at IS NOT NULL THEN payout_cents ELSE 0 END),0) as completed_cents FROM jobs WHERE ${where}`, ...params) as any;
+  return await d1Get(`SELECT COUNT(*) as total, SUM(CASE WHEN status='signed' THEN 1 ELSE 0 END) as signed, SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END) as sent, SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END) as cancelled, SUM(CASE WHEN status='declined' THEN 1 ELSE 0 END) as declined, SUM(CASE WHEN completed_at IS NOT NULL THEN 1 ELSE 0 END) as completed, COALESCE(SUM(CASE WHEN status='signed' THEN payout_cents ELSE 0 END),0) as earned_cents, COALESCE(SUM(CASE WHEN status='sent' THEN payout_cents ELSE 0 END),0) as pending_cents, COALESCE(SUM(CASE WHEN completed_at IS NOT NULL THEN payout_cents ELSE 0 END),0) as completed_cents FROM jobs WHERE ${where}`, ...params) as any;
 }
 export async function listIncomeJobs(userId: number, role: string, limit=50){
   let where=''; const params:any[]=[];
@@ -731,11 +769,12 @@ export async function getTeamStats(fromTs?: number, toTs?: number){
   const timeParams = fromTs!=null && toTs!=null ? [fromTs, toTs] : [];
   const agg = new Map<number, any>();
   function mergeAgg(uid:number, row:any){
-    const cur = agg.get(uid) ?? { total:0, signed:0, sent:0, cancelled:0, completed:0, total_cents:0, earned_cents:0 };
+    const cur = agg.get(uid) ?? { total:0, signed:0, sent:0, cancelled:0, declined:0, completed:0, total_cents:0, earned_cents:0 };
     cur.total += Number(row.total??0);
     cur.signed += Number(row.signed??0);
     cur.sent += Number(row.sent??0);
     cur.cancelled += Number(row.cancelled??0);
+    cur.declined += Number(row.declined??0);
     cur.completed += Number(row.completed??0);
     cur.total_cents += Number(row.total_cents??0);
     cur.earned_cents += Number(row.earned_cents??0);
@@ -743,23 +782,23 @@ export async function getTeamStats(fromTs?: number, toTs?: number){
   }
   if (techIds.length){
     const ph = techIds.map(()=> '?').join(',');
-    const rows:any[] = await d1All(`SELECT tech_id as uid, COUNT(*) as total, COALESCE(SUM(CASE WHEN status='signed' THEN 1 ELSE 0 END),0) as signed, COALESCE(SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END),0) as sent, COALESCE(SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END),0) as cancelled, COALESCE(SUM(CASE WHEN completed_at IS NOT NULL THEN 1 ELSE 0 END),0) as completed, COALESCE(SUM(payout_cents),0) as total_cents, COALESCE(SUM(CASE WHEN status='signed' THEN payout_cents ELSE 0 END),0) as earned_cents FROM jobs WHERE tech_id IN (${ph})${timeFilter} GROUP BY tech_id`, ...techIds, ...timeParams);
-    for (const r of rows) agg.set(Number(r.uid), { total:Number(r.total), signed:Number(r.signed), sent:Number(r.sent), cancelled:Number(r.cancelled), completed:Number(r.completed), total_cents:Number(r.total_cents), earned_cents:Number(r.earned_cents) });
+    const rows:any[] = await d1All(`SELECT tech_id as uid, COUNT(*) as total, COALESCE(SUM(CASE WHEN status='signed' THEN 1 ELSE 0 END),0) as signed, COALESCE(SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END),0) as sent, COALESCE(SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END),0) as cancelled, COALESCE(SUM(CASE WHEN status='declined' THEN 1 ELSE 0 END),0) as declined, COALESCE(SUM(CASE WHEN completed_at IS NOT NULL THEN 1 ELSE 0 END),0) as completed, COALESCE(SUM(payout_cents),0) as total_cents, COALESCE(SUM(CASE WHEN status='signed' THEN payout_cents ELSE 0 END),0) as earned_cents FROM jobs WHERE tech_id IN (${ph})${timeFilter} GROUP BY tech_id`, ...techIds, ...timeParams);
+    for (const r of rows) agg.set(Number(r.uid), { total:Number(r.total), signed:Number(r.signed), sent:Number(r.sent), cancelled:Number(r.cancelled), declined:Number(r.declined), completed:Number(r.completed), total_cents:Number(r.total_cents), earned_cents:Number(r.earned_cents) });
   }
   if (salesIds.length){
     const ph = salesIds.map(()=> '?').join(',');
-    const rows:any[] = await d1All(`SELECT booked_by as uid, COUNT(*) as total, COALESCE(SUM(CASE WHEN status='signed' THEN 1 ELSE 0 END),0) as signed, COALESCE(SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END),0) as sent, COALESCE(SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END),0) as cancelled, COALESCE(SUM(CASE WHEN completed_at IS NOT NULL THEN 1 ELSE 0 END),0) as completed, COALESCE(SUM(payout_cents),0) as total_cents, COALESCE(SUM(CASE WHEN status='signed' THEN payout_cents ELSE 0 END),0) as earned_cents FROM jobs WHERE booked_by IN (${ph})${timeFilter} GROUP BY booked_by`, ...salesIds, ...timeParams);
-    for (const r of rows) agg.set(Number(r.uid), { total:Number(r.total), signed:Number(r.signed), sent:Number(r.sent), cancelled:Number(r.cancelled), completed:Number(r.completed), total_cents:Number(r.total_cents), earned_cents:Number(r.earned_cents) });
+    const rows:any[] = await d1All(`SELECT booked_by as uid, COUNT(*) as total, COALESCE(SUM(CASE WHEN status='signed' THEN 1 ELSE 0 END),0) as signed, COALESCE(SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END),0) as sent, COALESCE(SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END),0) as cancelled, COALESCE(SUM(CASE WHEN status='declined' THEN 1 ELSE 0 END),0) as declined, COALESCE(SUM(CASE WHEN completed_at IS NOT NULL THEN 1 ELSE 0 END),0) as completed, COALESCE(SUM(payout_cents),0) as total_cents, COALESCE(SUM(CASE WHEN status='signed' THEN payout_cents ELSE 0 END),0) as earned_cents FROM jobs WHERE booked_by IN (${ph})${timeFilter} GROUP BY booked_by`, ...salesIds, ...timeParams);
+    for (const r of rows) agg.set(Number(r.uid), { total:Number(r.total), signed:Number(r.signed), sent:Number(r.sent), cancelled:Number(r.cancelled), declined:Number(r.declined), completed:Number(r.completed), total_cents:Number(r.total_cents), earned_cents:Number(r.earned_cents) });
   }
   if (adminIds.length){
     // Admin counts jobs where they are tech OR booker — aggregate in SQL with OR, small result set
     const ph = adminIds.map(()=> '?').join(',');
-    const rows:any[] = await d1All(`SELECT u.id as uid, COUNT(j.id) as total, COALESCE(SUM(CASE WHEN j.status='signed' THEN 1 ELSE 0 END),0) as signed, COALESCE(SUM(CASE WHEN j.status='sent' THEN 1 ELSE 0 END),0) as sent, COALESCE(SUM(CASE WHEN j.status='cancelled' THEN 1 ELSE 0 END),0) as cancelled, COALESCE(SUM(CASE WHEN j.completed_at IS NOT NULL THEN 1 ELSE 0 END),0) as completed, COALESCE(SUM(j.payout_cents),0) as total_cents, COALESCE(SUM(CASE WHEN j.status='signed' THEN j.payout_cents ELSE 0 END),0) as earned_cents FROM users u LEFT JOIN jobs j ON (j.tech_id=u.id OR j.booked_by=u.id)${timeFilter.replace('starts_at','j.starts_at')} WHERE u.id IN (${ph}) GROUP BY u.id`, ...timeParams, ...adminIds);
-    for (const r of rows) agg.set(Number(r.uid), { total:Number(r.total), signed:Number(r.signed), sent:Number(r.sent), cancelled:Number(r.cancelled), completed:Number(r.completed), total_cents:Number(r.total_cents), earned_cents:Number(r.earned_cents) });
+    const rows:any[] = await d1All(`SELECT u.id as uid, COUNT(j.id) as total, COALESCE(SUM(CASE WHEN j.status='signed' THEN 1 ELSE 0 END),0) as signed, COALESCE(SUM(CASE WHEN j.status='sent' THEN 1 ELSE 0 END),0) as sent, COALESCE(SUM(CASE WHEN j.status='cancelled' THEN 1 ELSE 0 END),0) as cancelled, COALESCE(SUM(CASE WHEN j.status='declined' THEN 1 ELSE 0 END),0) as declined, COALESCE(SUM(CASE WHEN j.completed_at IS NOT NULL THEN 1 ELSE 0 END),0) as completed, COALESCE(SUM(j.payout_cents),0) as total_cents, COALESCE(SUM(CASE WHEN j.status='signed' THEN j.payout_cents ELSE 0 END),0) as earned_cents FROM users u LEFT JOIN jobs j ON (j.tech_id=u.id OR j.booked_by=u.id)${timeFilter.replace('starts_at','j.starts_at')} WHERE u.id IN (${ph}) GROUP BY u.id`, ...timeParams, ...adminIds);
+    for (const r of rows) agg.set(Number(r.uid), { total:Number(r.total), signed:Number(r.signed), sent:Number(r.sent), cancelled:Number(r.cancelled), declined:Number(r.declined), completed:Number(r.completed), total_cents:Number(r.total_cents), earned_cents:Number(r.earned_cents) });
   }
   const out:any[]=[];
   for(const u of users){
-    const row = agg.get(u.id) ?? { total:0, signed:0, sent:0, cancelled:0, completed:0, total_cents:0, earned_cents:0 };
+    const row = agg.get(u.id) ?? { total:0, signed:0, sent:0, cancelled:0, declined:0, completed:0, total_cents:0, earned_cents:0 };
     const blocks = 0;
     const conversion = row.total?Math.round((row.signed/row.total)*100):0;
     const completion = row.signed?Math.round((row.completed/row.signed)*100):0;
@@ -770,7 +809,7 @@ export async function getTeamStats(fromTs?: number, toTs?: number){
 export async function getSystemStats(fromTs?: number, toTs?: number){
   let where='1=1'; const params:any[]=[];
   if (fromTs!=null && toTs!=null){ where+=' AND starts_at >= ? AND starts_at < ?'; params.push(fromTs,toTs); }
-  const r:any = await d1Get(`SELECT COUNT(*) as total, COALESCE(SUM(CASE WHEN status='signed' THEN 1 ELSE 0 END),0) as signed, COALESCE(SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END),0) as sent, COALESCE(SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END),0) as cancelled, COALESCE(SUM(CASE WHEN completed_at IS NOT NULL THEN 1 ELSE 0 END),0) as completed, COALESCE(SUM(payout_cents),0) as total_cents, COALESCE(SUM(CASE WHEN status='signed' THEN payout_cents ELSE 0 END),0) as earned_cents FROM jobs WHERE ${where}`, ...params);
+  const r:any = await d1Get(`SELECT COUNT(*) as total, COALESCE(SUM(CASE WHEN status='signed' THEN 1 ELSE 0 END),0) as signed, COALESCE(SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END),0) as sent, COALESCE(SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END),0) as cancelled, COALESCE(SUM(CASE WHEN status='declined' THEN 1 ELSE 0 END),0) as declined, COALESCE(SUM(CASE WHEN completed_at IS NOT NULL THEN 1 ELSE 0 END),0) as completed, COALESCE(SUM(payout_cents),0) as total_cents, COALESCE(SUM(CASE WHEN status='signed' THEN payout_cents ELSE 0 END),0) as earned_cents FROM jobs WHERE ${where}`, ...params);
   r.conversion = r.total?Math.round((r.signed/r.total)*100):0; r.completion = r.signed?Math.round((r.completed/r.signed)*100):0; return r;
 }
 export async function haversineKm(aLat:number,aLng:number,bLat:number,bLng:number): Promise<number>{ return _haversineKm(aLat,aLng,bLat,bLng); }

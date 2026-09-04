@@ -17,14 +17,16 @@ export const load: PageServerLoad = async ({ locals }) => {
     ]);
     for (const t of techs) {
       templatesByTech[t.id] = allTemplates.filter((r:any)=> r.tech_id === t.id);
-      jobsByTech[t.id] = allJobs.filter((j:any)=> j.tech_id === t.id && j.status!=='cancelled').slice(0,20);
+      jobsByTech[t.id] = allJobs.filter((j:any)=> j.tech_id === t.id && j.status!=='cancelled' && j.status!=='declined').slice(0,20);
     }
   }
   return {
     techs: techs.map(t => ({ id: t.id, display_name: t.display_name })),
     templatesByTech,
     unavailableByTech: {} as Record<number, any[]>,
-    jobsByTech
+    jobsByTech,
+    // Sales can view hours but not change them (savePatterns 403s them).
+    canSave: locals.user.role !== 'sales'
   };
 };
 

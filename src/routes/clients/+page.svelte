@@ -4,9 +4,10 @@
 
   let query = '';
   // Contract stage from job status + completion:
-  //   sent (not yet signed) → pending, signed + done → installed, signed → signed, cancelled → cancelled
+  //   sent (not yet signed) → pending, signed + done → installed, signed → signed, cancelled/declined → themselves
   const stage = (j: { status: string; completed_at: number | null }) => {
     if (j.status === 'cancelled') return 'cancelled';
+    if (j.status === 'declined') return 'declined';
     if (j.status === 'sent') return 'pending';
     return j.completed_at ? 'installed' : 'signed';
   };
@@ -41,13 +42,24 @@
   {:else}
     <div class="group-rows">
       {#each filtered as j (j.id)}
-        <a class="job-row" href={`/jobs/${j.id}`}>
-          <div class="top">
-            <span class="name">{j.client_name}</span>
-            <span class="pill {stage(j)}">{stage(j)}</span>
+        {#if data.isAdmin}
+          <!-- Admins can't open job details (policy redirects /jobs → /clients), so no link. -->
+          <div class="job-row">
+            <div class="top">
+              <span class="name">{j.client_name}</span>
+              <span class="pill {stage(j)}">{stage(j)}</span>
+            </div>
+            <div class="when">{j.address}</div>
           </div>
-          <div class="when">{j.address}</div>
-        </a>
+        {:else}
+          <a class="job-row" href={`/jobs/${j.id}`}>
+            <div class="top">
+              <span class="name">{j.client_name}</span>
+              <span class="pill {stage(j)}">{stage(j)}</span>
+            </div>
+            <div class="when">{j.address}</div>
+          </a>
+        {/if}
       {/each}
     </div>
   {/if}

@@ -1,8 +1,10 @@
 import type { LayoutServerLoad } from './$types';
-import { generateMorningSummaries, unreadCount } from '$lib/server/notifications';
+import { unreadCount } from '$lib/server/notifications';
 
 export const load: LayoutServerLoad = async ({ locals }) => {
-  if(locals.user) await generateMorningSummaries();
+  // NOTE: morning summaries + push delivery are owned by the 15-min cron
+  // (`/api/notifications/cron`). They used to run here on EVERY navigation,
+  // putting multiple queries + inserts in the path of every tap.
   return {
     user: locals.user ? {
       id: locals.user.id,

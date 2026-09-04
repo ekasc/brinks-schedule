@@ -6,6 +6,7 @@
   export let data: PageData;
 
   let notificationBusy = false;
+  let listMessage = '';
   let pushBusy = false;
   let pushEnabled = false;
   let pushSupported = true;
@@ -64,19 +65,32 @@
 
   async function markRead(id: number) {
     notificationBusy = true;
+    listMessage = '';
     try {
       await post(`/api/notifications/${id}/read`);
       await invalidateAll();
+    } catch {
+      // Surface failure — the old silent swallow made taps feel dead on flaky networks.
+      listMessage = 'Could not mark as read. Try again.';
     } finally {
       notificationBusy = false;
     }
   }
 
+  // Fire-and-forget read on open: the destination page's layout load refetches
+  // the unread count, so no invalidate needed here. keepalive survives the nav.
+  function markReadQuiet(id: number) {
+    fetch(`/api/notifications/${id}/read`, { method: 'POST', keepalive: true }).catch(() => {});
+  }
+
   async function markAllRead() {
     notificationBusy = true;
+    listMessage = '';
     try {
       await post('/api/notifications/read-all');
       await invalidateAll();
+    } catch {
+      listMessage = 'Could not mark all as read. Try again.';
     } finally {
       notificationBusy = false;
     }
@@ -160,6 +174,7 @@
   <div class="group-title" id="notification-list-heading">
     {data.unread > 0 ? `${data.unread} unread` : 'Recent'}
   </div>
+  {#if listMessage}<p class="mx-4 mt-1 text-[13px] text-[var(--red)]" role="alert">{listMessage}</p>{/if}
   {#if data.notifications.length === 0}
     <div class="empty">No notifications yet.</div>
   {:else}
@@ -168,7 +183,7 @@
         <article class:unread={!notification.read_at} class="notification-row">
           <div class="notification-copy">
             {#if notification.url}
-              <a class="notification-link" href={notification.url}>
+              <a class="notification-link" href={notification.url} on:click={() => markReadQuiet(notification.id)}>
                 <strong>{notification.title}</strong>
                 <span>{notification.body}</span>
               </a>

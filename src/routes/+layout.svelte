@@ -1,6 +1,6 @@
 <script lang="ts">
   import '../app.css';
-  import { page } from '$app/stores';
+  import { page, navigating } from '$app/stores';
   import { onMount } from 'svelte';
   import { dev } from '$app/environment';
   import { Button, Popover } from 'bits-ui';
@@ -23,10 +23,22 @@
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('theme', theme);
   }
-  async function logout() { await fetch('/logout', { method: 'POST' }); window.location.href = '/login'; }
+  async function logout() {
+    if (loggingOut) return;
+    loggingOut = true;
+    try {
+      await fetch('/logout', { method: 'POST' });
+    } finally {
+      window.location.href = '/login';
+    }
+  }
   let moreOpen = false;
+  let loggingOut = false;
 </script>
 
+{#if $navigating}
+  <div class="nav-progress" aria-hidden="true"><span></span></div>
+{/if}
 {#if user}
   <div class="bar-wrap">
     <div class="bar">
@@ -60,7 +72,7 @@
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
           {/if}
         </Button.Root>
-        <Button.Root class="bar-logout" onclick={logout} aria-label="Sign out">Sign out</Button.Root>
+        <Button.Root class="bar-logout" onclick={logout} aria-label="Sign out" disabled={loggingOut}>{loggingOut ? 'Signing out…' : 'Sign out'}</Button.Root>
       </nav>
       <div class="more-menu">
         <Popover.Root bind:open={moreOpen}>
@@ -102,9 +114,9 @@
                   {theme === 'dark' ? 'Light mode' : 'Dark mode'}
                 </button>
                 <div class="my-1 h-px bg-[var(--line-thin)]"></div>
-                <button type="button" onclick={logout} class="flex min-h-11 w-full items-center gap-3 rounded-[10px] px-3 py-2 text-left text-[15px] font-medium text-[var(--red)] hover:bg-[color-mix(in_srgb,var(--red)_8%,transparent)] active:bg-[color-mix(in_srgb,var(--red)_12%,transparent)]">
+                <button type="button" onclick={logout} disabled={loggingOut} class="flex min-h-11 w-full items-center gap-3 rounded-[10px] px-3 py-2 text-left text-[15px] font-medium text-[var(--red)] hover:bg-[color-mix(in_srgb,var(--red)_8%,transparent)] active:bg-[color-mix(in_srgb,var(--red)_12%,transparent)] disabled:opacity-50">
                   <span class="grid h-7 w-7 place-items-center rounded-full bg-[color-mix(in_srgb,var(--red)_10%,transparent)] text-[var(--red)]"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span>
-                  Sign out
+                  {loggingOut ? 'Signing out…' : 'Sign out'}
                 </button>
               </div>
             </Popover.Content>
@@ -164,4 +176,4 @@
     {/if}
   </nav>
 {/if}
-<main class="page"><slot /></main>
+<main class="page" class:page-loading={$navigating != null} aria-busy={$navigating != null ? 'true' : undefined}><slot /></main>

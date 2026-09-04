@@ -1,8 +1,9 @@
 <script lang="ts">
   import type { PageData } from './$types';
+  import { localIsoDay } from '$lib/dashboardView';
   export let data: PageData;
 
-  $: todayIso = new Date().toISOString().slice(0, 10);
+  $: todayIso = localIsoDay();
   $: weekEnd = data.days.at(-1)?.date;
   $: totalJobs = data.days.reduce(
     (total, day) => total + day.techs.reduce((dayTotal, tech) => dayTotal + tech.jobs.length, 0),
@@ -35,7 +36,7 @@
   <div class="flex flex-wrap items-end justify-between gap-3">
     <div>
       <p class="mb-1 text-[13px] font-medium uppercase tracking-[0.04em] text-[var(--dim)]">
-        {data.offsetWeeks === 0 ? 'This week' : data.offsetWeeks > 0 ? `${data.offsetWeeks} week${data.offsetWeeks === 1 ? '' : 's'} ahead` : `${Math.abs(data.offsetWeeks)} week${data.offsetWeeks === -1 ? '' : 's'} ago`}
+        {data.offsetWeeks === 0 ? 'Next 7 days' : data.offsetWeeks > 0 ? `${data.offsetWeeks} week${data.offsetWeeks === 1 ? '' : 's'} ahead` : `${Math.abs(data.offsetWeeks)} week${data.offsetWeeks === -1 ? '' : 's'} ago`}
       </p>
       <h1 class="text-[28px] font-bold leading-none tracking-[-0.02em] text-[var(--ink)]">
         {weekLabel(data.weekStartIso, weekEnd)}
