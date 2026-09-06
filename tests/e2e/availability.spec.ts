@@ -1,5 +1,21 @@
 import { test, expect } from '@playwright/test';
+import Database from 'better-sqlite3';
 import { login } from './helpers';
+
+const DB_PATH = process.env.DB_PATH || '/tmp/brinks-test-e2e.db';
+
+// Safety net: the Monday test below toggles tech1's hours. The suite shares
+// one seeded DB, so guarantee Monday 9-17 survives even if that test fails
+// mid-way (INSERT OR IGNORE keeps existing custom hours).
+test.afterEach(async () => {
+  const db = new Database(DB_PATH);
+  try {
+    const t1 = db.prepare('SELECT id FROM users WHERE username = ?').get('tech1') as { id: number };
+    db.prepare('INSERT OR IGNORE INTO availability_templates (tech_id, dow, start_min, end_min) VALUES (?, ?, ?, ?)').run(t1.id, 1, 540, 1020);
+  } finally {
+    db.close();
+  }
+});
 
 function nextMondayIso(): string {
   const d = new Date();
@@ -103,9 +119,15 @@ test.describe('availability', () => {
     }
   });
 
-  test('sales cannot post availability (no form action)', async ({ page }) => {
+  test('sales cannot post availability (no Save button, action 403s)', async ({ page }) => {
     await login(page, 'ekas');
     await page.goto('/availability');
-    await expect(page).toHaveURL(/\/availability|\/login|\//);
+    await expect(page.getByRole('heading', { name: /Hours/i })).toBeVisible();
+    await expect(page.getByText('this view is read-only')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Save' })).toHaveCount(0);
+    const res = await page.request.post('/availability?/savePatterns', {
+      form: { tech_id: '1', patterns: '[]' }
+    });
+    expect(res.status()).toBe(403);
   });
 });

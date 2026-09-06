@@ -45,6 +45,8 @@ export const actions: Actions = {
     if (password && !validPassword(password)) return fail(400, { error: 'invalid password' });
     const existing = await findUserById(id);
     if (!existing) return fail(404, { error: 'user not found' });
+    // No self-demotion: an admin must not lock themselves (or the last admin) out.
+    if (id === locals.user.id && role !== 'admin') return fail(400, { error: 'you cannot remove your own admin role' });
     try {
       if (displayName !== existing.display_name) await updateDisplayName(id, displayName);
       if (username !== existing.username) await updateUsername(id, username);

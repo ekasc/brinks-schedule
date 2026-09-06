@@ -1,6 +1,6 @@
 import { describe, test } from 'vitest';
 import assert from 'node:assert/strict';
-import { parseWeekOffset, startOfDayLocal } from '$lib/server/weekOffset';
+import { parseWeekOffset } from '$lib/server/weekOffset';
 
 describe('parseWeekOffset', () => {
   test('valid integers', () => {
@@ -40,25 +40,31 @@ describe('parseWeekOffset', () => {
   });
 });
 
-describe('week base helpers', () => {
-  test('startOfDayLocal is local midnight, same date', () => {
-    const base = startOfDayLocal(new Date(2026, 8, 4, 15, 30, 45, 123));
-    assert.equal(base.getFullYear(), 2026);
-    assert.equal(base.getMonth(), 8);
-    assert.equal(base.getDate(), 4);
-    assert.equal(base.getHours(), 0);
-    assert.equal(base.getMinutes(), 0);
-    assert.equal(base.getSeconds(), 0);
-    assert.equal(base.getMilliseconds(), 0);
+describe('vancouver wall-day helpers (server-TZ independent)', () => {
+  test('addWallDays / wallDayIso are pure calendar math', async () => {
+    const { addWallDays, wallDayIso } = await import('$lib/server/weekOffset');
+    assert.deepEqual(addWallDays({ year: 2026, month: 9, day: 4 }, 1), { year: 2026, month: 9, day: 5 });
+    assert.deepEqual(addWallDays({ year: 2026, month: 9, day: 4 }, -4), { year: 2026, month: 8, day: 31 });
+    assert.deepEqual(addWallDays({ year: 2026, month: 12, day: 31 }, 1), { year: 2027, month: 1, day: 1 });
+    assert.equal(wallDayIso({ year: 2026, month: 9, day: 5 }), '2026-09-05');
   });
-  test('rolling base: offset weeks shift by exactly 7 days', () => {
-    const now = new Date(2026, 8, 4, 9, 0, 0);
-    for (const w of [-1, 0, 1, 2]) {
-      const base = startOfDayLocal(now);
-      base.setDate(base.getDate() + w * 7);
-      const expected = new Date(2026, 8, 4);
-      expected.setDate(expected.getDate() + w * 7);
-      assert.equal(base.getTime(), expected.getTime());
-    }
+  test('vancouverDayRange covers exactly the wall day', async () => {
+    const mod = await import('$lib/server/weekOffset');
+    const db = await import('$lib/server/db');
+    const { start, end } = mod.vancouverDayRange({ year: 2026, month: 9, day: 5 });
+    assert.equal(end - start, 86400);
+    const ps = db.getVancouverParts(start);
+    assert.deepEqual([ps.year, ps.month, ps.day, ps.hour, ps.minute], [2026, 9, 5, 0, 0]);
+    const pe = db.getVancouverParts(end - 1);
+    assert.deepEqual([pe.year, pe.month, pe.day], [2026, 9, 5]);
+    const pn = db.getVancouverParts(end);
+    assert.deepEqual([pn.year, pn.month, pn.day, pn.hour], [2026, 9, 6, 0]);
+  });
+  test('DST boundaries: 23h spring-forward, 25h fall-back (US 2026)', async () => {
+    const mod = await import('$lib/server/weekOffset');
+    const spring = mod.vancouverDayRange({ year: 2026, month: 3, day: 8 });
+    assert.equal(spring.end - spring.start, 23 * 3600);
+    const fall = mod.vancouverDayRange({ year: 2026, month: 11, day: 1 });
+    assert.equal(fall.end - fall.start, 25 * 3600);
   });
 });

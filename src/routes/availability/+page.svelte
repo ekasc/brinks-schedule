@@ -1,11 +1,11 @@
 <script lang="ts">
-  import type { PageData, ActionData } from './$types';
+  import type { PageData } from './$types';
   import { invalidateAll } from '$app/navigation';
   import { deserialize } from '$app/forms';
   import { Button, Select } from 'bits-ui';
   import BitsTimeField from '$lib/components/BitsTimeField.svelte';
   export let data: PageData;
-  export let form: ActionData;
+  // NOTE: no `form` prop — saves go through fetch('?/savePatterns') + saveOk.
 
   const DAYS = [
     { dow: 1, label: 'Monday' },
@@ -89,12 +89,15 @@
     }
     confirmClear = false;
     saving=true;
+    // Capture the saved tech up front: if the user switches techs while the
+    // request is in flight, resolving must not wipe the NEW tech's draft.
+    const savedTech = selectedTech;
     try{
       const fd=new FormData();
-      fd.set('tech_id', String(selectedTech));
+      fd.set('tech_id', String(savedTech));
       fd.set('patterns', JSON.stringify(patterns));
       const res=await fetch('?/savePatterns', {method:'POST', body:fd});
-      if (res.ok){ saveOk=true; setTimeout(()=>saveOk=false,1500); await invalidateAll(); delete drafts[selectedTech]; initializedFor=null; }
+      if (res.ok){ saveOk=true; setTimeout(()=>saveOk=false,1500); await invalidateAll(); delete drafts[savedTech]; if (selectedTech===savedTech) initializedFor=null; }
       else {
         const txt=await res.text();
         try{

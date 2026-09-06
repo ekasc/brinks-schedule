@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { PageData } from './$types';
+  import { fmtVancouverDay, fmtVancouverTime } from '$lib/dashboardView';
   import { invalidateAll } from '$app/navigation';
   import { Button } from 'bits-ui';
   import { fly, scale } from 'svelte/transition';
@@ -7,12 +8,13 @@
   export let data: PageData;
 
   let busy = false;
+  let actionErr = '';
   let confirmStatus: string | null = null;
   let confirmCompleted = false;
   $: if (busy) { confirmStatus = null; confirmCompleted = false; }
 
   function fmt(ts: number) {
-    return new Date(ts * 1000).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    return `${fmtVancouverDay(ts)}, ${fmtVancouverTime(ts)}`;
   }
   function fmtDate(s: string) {
     return new Date(s + 'T00:00:00').toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
@@ -29,10 +31,12 @@
   async function setStatus(s: string) {
     busy = true;
     confirmStatus = null;
+    actionErr = '';
     try {
       const fd = new FormData();
       fd.set('status', s);
-      await fetch('?/status', { method: 'POST', body: fd });
+      const res = await fetch('?/status', { method: 'POST', body: fd });
+      if (!res.ok) actionErr = res.status === 409 ? 'That change conflicts with another booking.' : 'Could not update status. Try again.';
       await invalidateAll();
     } finally {
       busy = false;
@@ -69,10 +73,12 @@
   async function setCompleted(done: boolean) {
     busy = true;
     confirmCompleted = false;
+    actionErr = '';
     try {
       const fd = new FormData();
       fd.set('completed', done ? '1' : '0');
-      await fetch('?/complete', { method: 'POST', body: fd });
+      const res = await fetch('?/complete', { method: 'POST', body: fd });
+      if (!res.ok) actionErr = res.status === 409 ? 'That change conflicts with another booking.' : 'Could not update. Try again.';
       await invalidateAll();
     } finally {
       busy = false;
@@ -80,10 +86,6 @@
   }
   function requestCompleted() {
     confirmCompleted = true;
-  }
-
-  function fmtFull(ts: number) {
-    return new Date(ts * 1000).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
   }
 
   function bookingSummary(): string {
@@ -114,7 +116,7 @@
     L('Services', services.length ? services.map(s => s.detail ? `${s.label} (${s.detail})` : s.label).join(', ') : '—');
     L('Price', j.price_cents ? '$' + (j.price_cents / 100).toFixed(2) : '—');
     blank();
-    L('Install date and time', `${fmtFull(j.starts_at)} – ${fmtFull(j.ends_at)}`);
+    L('Install date and time', `${fmt(j.starts_at)} – ${fmt(j.ends_at)}`);
     L('Any extra equipment', j.themes);
     blank();
     L('Emergency contact name', j.emergency_name);
@@ -346,6 +348,7 @@
 <!-- Actions: generous separation before, tight internal grouping -->
 {#if data.canEdit}
   <div class="mt-8 flex flex-col gap-3 px-4">
+    {#if actionErr}<div class="err" role="alert">{actionErr}</div>{/if}
     <div class="flex flex-wrap gap-2">
       <!-- set-location pin-drop button removed -->
       <a href={`/jobs/${j.id}/edit`} class="rounded-full bg-[var(--row)] px-4 py-2 text-[15px] font-medium text-[var(--blue)] border border-[var(--line)] hover:bg-[var(--row2)]">Edit</a>

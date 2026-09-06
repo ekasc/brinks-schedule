@@ -6,7 +6,7 @@
   import { Select, Button, Calendar, Popover } from 'bits-ui';
   import { CalendarDate, parseDate, today, getLocalTimeZone } from '@internationalized/date';
   import { cubicOut } from 'svelte/easing';
-  import { localIsoDay, localIsoTomorrow } from '$lib/dashboardView';
+  import { fmtVancouverDay, fmtVancouverTime, vancouverIsoDay, vancouverIsoTomorrow } from '$lib/dashboardView';
   import { onMount } from 'svelte';
   import type { PageData, ActionData } from './$types';
   export let data: PageData;
@@ -15,8 +15,6 @@
 
   let techId = data.preselectTech;
   let durationMin = data.durationMin;
-  // keep in sync only on initial load, local changes are via history.replaceState (no reload)
-  $: if (data.preselectTech && data.preselectTech !== techId && !history.state?.keepTech) techId = data.preselectTech;
   let startSlotTs = 0;
   $: clientName = $bookForm.client_name;
   $: streetVal = $bookForm.street;
@@ -66,7 +64,7 @@
     calSelectedDay = null;
   }
 
-  $: slots = (data.slotsByTechByDuration?.[techId]?.[durationMin] ?? data.slotsByTech[techId] ?? []);
+  $: slots = (data.slotsByTechByDuration?.[techId]?.[durationMin] ?? []);
   function localDateKey(ts:number) {
     const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Vancouver', year:'numeric', month:'2-digit', day:'2-digit' });
     const parts = fmt.formatToParts(new Date(ts*1000));
@@ -83,8 +81,10 @@
     return Array.from(map.entries()).sort();
   })();
 
-  $: todayIso = localIsoDay();
-  $: tomorrowIso = localIsoTomorrow();
+  // Slot day keys are Vancouver-wall (localDateKey) — badges must use the
+  // same clock, not browser-local dates.
+  $: todayIso = vancouverIsoDay();
+  $: tomorrowIso = vancouverIsoTomorrow();
   function isTomorrow(iso:string){ return iso===tomorrowIso; }
   let timeView: 'list' | 'calendar' = 'calendar';
   let calCursor: Date = new Date();
@@ -132,9 +132,9 @@
     if (isNaN(d.getTime())) return iso;
     return d.toLocaleDateString(undefined, { weekday: 'short' });
   }
-  function fmtDayFull(slot: { starts_at: number }) { const d=new Date(slot.starts_at*1000); return d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'}); }
+  function fmtDayFull(slot: { starts_at: number }) { return fmtVancouverDay(slot.starts_at); }
   function isToday(iso: string) { return iso === todayIso; }
-  function fmtTime(ts: number) { return new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); }
+  function fmtTime(ts: number) { return fmtVancouverTime(ts); }
 
   $: selectedSlot = slots.find(s => s.starts_at === startSlotTs);
   $: canSubmit = !!selectedSlot && !!clientName?.trim() && !!$bookForm.street?.trim() && !!$bookForm.city?.trim() && !!$bookForm.province?.trim() && !!$bookForm.postal_code?.trim() && !busy;

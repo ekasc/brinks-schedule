@@ -164,9 +164,10 @@ describe('edit save action', () => {
 });
 
 describe('edit delete action', () => {
-  test('only the booker can delete; completed jobs are protected', async () => {
+  test('strangers cannot delete; completed jobs are protected', async () => {
     const { tech, sales, sales2, jobId } = await setup();
-    let r = await editActions.delete({ params: { id: String(jobId) }, locals: { user: user(tech, 'tech') } });
+    const tech2 = await mkUser('tech', 'EditAct Other');
+    let r = await editActions.delete({ params: { id: String(jobId) }, locals: { user: user(tech2, 'tech') } });
     assert.equal(r.status, 403);
     r = await editActions.delete({ params: { id: String(jobId) }, locals: { user: user(sales2, 'sales') } });
     assert.equal(r.status, 403);
@@ -175,6 +176,8 @@ describe('edit delete action', () => {
     await db.setJobStatus(jobId, 'signed', sales);
     await db.setJobCompleted(jobId, Math.floor(Date.now() / 1000), sales);
     r = await editActions.delete({ params: { id: String(jobId) }, locals: { user: user(sales, 'sales') } });
+    assert.equal(r.status, 400);
+    r = await editActions.delete({ params: { id: String(jobId) }, locals: { user: user(tech, 'tech') } });
     assert.equal(r.status, 400);
     assert.ok(await db.getJob(jobId));
   });
@@ -186,6 +189,17 @@ describe('edit delete action', () => {
     assert.equal(err.location, '/');
     assert.equal(await db.getJob(jobId), undefined);
     const rows = await db.listNotifications(tech, 10);
+    assert.ok(rows.some((n) => n.url === '/' && /deleted/.test(n.body)));
+  });
+
+  test('assigned tech can delete incl. signed jobs, notifies the booker', async () => {
+    const { tech, sales, jobId } = await setup();
+    await db.setJobStatus(jobId, 'signed', sales);
+    const err = await caughtRedirect(editActions.delete({ params: { id: String(jobId) }, locals: { user: user(tech, 'tech') } }));
+    assert.equal(err.status, 303);
+    assert.equal(err.location, '/');
+    assert.equal(await db.getJob(jobId), undefined);
+    const rows = await db.listNotifications(sales, 10);
     assert.ok(rows.some((n) => n.url === '/' && /deleted/.test(n.body)));
   });
 });

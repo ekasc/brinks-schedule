@@ -18,7 +18,10 @@ export function getVancouverParts(ts: number): { year:number; month:number; day:
   const m = new Map(parts.map(p=>[p.type,p.value]));
   const weekdayStr = m.get('weekday')!;
   const map: Record<string,number> = {Sun:0,Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6};
-  return { year:Number(m.get('year')), month:Number(m.get('month')), day:Number(m.get('day')), dow: map[weekdayStr], hour:Number(m.get('hour')), minute:Number(m.get('minute')), second:Number(m.get('second')) };
+  // Some ICU builds (notably Cloudflare Workers) report midnight as hour 24
+  // with hour12:false. Normalize so midnight-start jobs don't compute as 1440.
+  const hour = Number(m.get('hour'));
+  return { year:Number(m.get('year')), month:Number(m.get('month')), day:Number(m.get('day')), dow: map[weekdayStr], hour: hour===24?0:hour, minute:Number(m.get('minute')), second:Number(m.get('second')) };
 }
 
 export function vancouverWallToEpoch(year:number, month:number, day:number, hour:number, minute:number, second=0): number {
@@ -300,6 +303,11 @@ export async function isJobWithinAvailability(techId: number, startsAt: number, 
   return false;
 }
 function availabilitySqlExistsForConstants(techId: number, dow: number, sMin: number, eMin: number): string {
+  // Interpolated, not bound (EXISTS fragment shared across statements) — so
+  // refuse non-integers at the boundary instead of trusting callers.
+  for (const v of [techId, dow, sMin, eMin]) {
+    if (!Number.isSafeInteger(v)) throw new Error('availability bounds must be safe integers');
+  }
   return `(
     EXISTS (
       SELECT 1 FROM availability_templates
@@ -307,23 +315,6 @@ function availabilitySqlExistsForConstants(techId: number, dow: number, sMin: nu
         AND dow = ${dow}
         AND start_min <= ${sMin}
         AND end_min >= ${eMin}
-    )
-  )`;
-}
-function availabilitySqlExists(techIdParam: string, startsParam: string, endsParam: string): string {
-  // Legacy SQL uses UTC strftime; kept only for fallback where column references are needed.
-  // New code should use availabilitySqlExistsForConstants with Vancouver-computed values.
-  const startMinExpr = `CAST(strftime('%H', datetime(${startsParam}, 'unixepoch','localtime')) AS INTEGER)*60 + CAST(strftime('%M', datetime(${startsParam}, 'unixepoch','localtime')) AS INTEGER)`;
-  const endMinExpr = `CASE WHEN CAST(strftime('%H', datetime(${endsParam}, 'unixepoch','localtime')) AS INTEGER)=0 AND CAST(strftime('%M', datetime(${endsParam}, 'unixepoch','localtime')) AS INTEGER)=0 THEN 1440 ELSE CAST(strftime('%H', datetime(${endsParam}, 'unixepoch','localtime')) AS INTEGER)*60 + CAST(strftime('%M', datetime(${endsParam}, 'unixepoch','localtime')) AS INTEGER) END`;
-  const dowExpr = `CAST(strftime('%w', datetime(${startsParam}, 'unixepoch','localtime')) AS INTEGER)`;
-  return `(
-    EXISTS (
-      SELECT 1 FROM availability_templates
-      WHERE tech_id = ${techIdParam}
-        AND dow = ${dowExpr}
-        AND date(datetime(${startsParam}, 'unixepoch','localtime')) = date(datetime(${endsParam}, 'unixepoch','localtime'))
-        AND start_min <= ${startMinExpr}
-        AND end_min >= ${endMinExpr}
     )
   )`;
 }
@@ -666,8 +657,9 @@ export async function getAvailableSlotsForDurationsForTechs(techIds: number[], b
 export async function listAllJobsForMap(){ return await d1All(`SELECT j.id, j.client_name, j.address, j.lat, j.lng, j.status, j.starts_at, j.tech_id, t.display_name AS tech_name FROM jobs j JOIN users t ON t.id=j.tech_id WHERE j.lat IS NOT NULL AND j.lng IS NOT NULL ORDER BY j.starts_at`) as any; }
 export async function listJobsForMapForTech(techId: number){ return await d1All(`SELECT j.id, j.client_name, j.address, j.lat, j.lng, j.status, j.starts_at, j.tech_id, t.display_name AS tech_name FROM jobs j JOIN users t ON t.id=j.tech_id WHERE j.tech_id = ? AND j.lat IS NOT NULL AND j.lng IS NOT NULL ORDER BY j.starts_at`, techId) as any; }
 // Contracts roster: one row per job (a contract is one-per-person on a 3-year term).
-export async function listContracts(): Promise<JobWithTech[]> {
-  return (await d1All(`SELECT j.*, t.display_name AS tech_name, b.display_name AS booker_name FROM jobs j JOIN users t ON t.id=j.tech_id JOIN users b ON b.id=j.booked_by ORDER BY j.client_name COLLATE NOCASE`)) as JobWithTech[];
+// Summary columns only — the page shows names/addresses, never PII fields.
+export async function listContracts(): Promise<JobSummary[]> {
+  return await d1All(`SELECT ${SAFE_JOB_COLS} FROM jobs j JOIN users t ON t.id=j.tech_id JOIN users b ON b.id=j.booked_by ORDER BY j.client_name COLLATE NOCASE`) as JobSummary[];
 }
 
 export async function countUnmappedForTech(techId: number): Promise<number> {
@@ -682,8 +674,12 @@ export async function countUnmapped(): Promise<number> {
 }
 
 // Backfill coordinates for jobs created before geocoding (or with it off).
-export async function geocodeMissingCoords(limit = 100): Promise<{ done: number; ok: number; failed: number }> {
-  const rows = (await d1All(`SELECT id, address FROM jobs WHERE lat IS NULL OR lng IS NULL LIMIT ?`, limit)) as { id: number; address: string }[];
+// techId scopes the backfill to one tech's jobs (map action passes the
+// caller's id for techs so one tap can't burn quota on everyone's jobs).
+export async function geocodeMissingCoords(limit = 100, techId?: number): Promise<{ done: number; ok: number; failed: number }> {
+  const rows = (techId == null
+    ? await d1All(`SELECT id, address FROM jobs WHERE lat IS NULL OR lng IS NULL LIMIT ?`, limit)
+    : await d1All(`SELECT id, address FROM jobs WHERE tech_id = ? AND (lat IS NULL OR lng IS NULL) LIMIT ?`, techId, limit)) as { id: number; address: string }[];
   let ok = 0;
   let failed = 0;
   for (const row of rows) {

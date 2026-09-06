@@ -99,7 +99,9 @@ export const actions: Actions = {
   save: async ({ request, params, locals }) => {
     if (!locals.user) return fail(403, { error: 'forbidden' });
     const id = Number(params.id);
-    const existing = await getJobSummary(id);
+    // Single fetch: the private row carries every summary field the checks
+    // below need (tech_id, booked_by, starts/ends, completed_at).
+    const existing = await getJobPrivate(id);
     if (!existing) return fail(404, { error: 'not found' });
     if (!canViewJob(locals.user, existing)) return fail(403, { error: 'forbidden' });
     if (!canChangeJobStatus(locals.user, existing)) return fail(403, { error: 'forbidden' });
@@ -141,10 +143,9 @@ export const actions: Actions = {
     const dobRaw = str(data.get('dob'));
     if (dobRaw && Number.isNaN(new Date(dobRaw).getTime()))
       return fail(400, { error: 'Date of birth isn’t valid.' });
-    // Fetch the stored row first: needed for the no-op check below, and to
-    // protect a legacy non-ISO dob (which a date input can't represent) from
-    // being wiped by an untouched save.
-    const before = await getJobPrivate(id);
+    // Protect a legacy non-ISO dob (which a date input can't represent) from
+    // being wiped by an untouched save. `existing` is already the private row.
+    const before = existing;
     const dob =
       dobRaw === '' && before?.dob && !/^\d{4}-\d{2}-\d{2}$/.test(before.dob) ? before.dob : opt(dobRaw);
 
@@ -244,12 +245,15 @@ export const actions: Actions = {
     const id = Number(params.id);
     const job = await getJobSummary(id);
     if (!job) return fail(404, { error: 'not found' });
-    if (!(locals.user.role === 'sales' && job.booked_by === locals.user.id))
-      return fail(403, { error: 'Only the sales rep who booked this job can delete it.' });
+    const isSalesOwner = locals.user.role === 'sales' && job.booked_by === locals.user.id;
+    const isTechOwner = locals.user.role === 'tech' && job.tech_id === locals.user.id;
+    if (!isSalesOwner && !isTechOwner)
+      return fail(403, { error: 'Only the assigned technician or the sales rep who booked this job can delete it.' });
     if (job.completed_at != null)
       return fail(400, { error: 'This install is marked complete — reopen it before deleting it.' });
-    // Tell the tech before the row (and its link) is gone.
-    await notifyUser(job.tech_id, 'Booking updated', `${job.client_name} was deleted.`, '/', `job:${id}:deleted`).catch(() => {});
+    // Tell the other party before the row (and its link) is gone.
+    const notifyId = locals.user.role === 'tech' ? job.booked_by : job.tech_id;
+    await notifyUser(notifyId, 'Booking updated', `${job.client_name} was deleted.`, '/', `job:${id}:deleted`).catch(() => {});
     await deleteJob(id);
     throw redirect(303, '/');
   }

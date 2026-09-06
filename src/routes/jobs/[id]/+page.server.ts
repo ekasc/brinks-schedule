@@ -26,7 +26,8 @@ export const load: PageServerLoad = async ({ params, locals }) => {
   const canEdit = canSeePii;
   return {
     job,
-    tech: tech ? { id: tech.id, display_name: tech.display_name, username: tech.username } : null,
+    // display_name only — username is a login identifier, not a display field.
+    tech: tech ? { id: tech.id, display_name: tech.display_name } : null,
     booker: booker ? { id: booker.id, display_name: booker.display_name } : null,
     canEdit,
     canSeePii

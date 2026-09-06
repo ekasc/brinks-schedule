@@ -15,22 +15,19 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   const preselectTech = normalizeTechSelection(url.searchParams.get('tech'), techs.map((t) => t.id));
   const durationMin = normalizeDuration(url.searchParams.get('dur'));
   const allDurations = [60, 90, 120] as const;
-  const slotsByTech: Record<number, { starts_at: number; ends_at: number }[]> = {};
   const slotsByTechByDuration: Record<number, Record<number, { starts_at: number; ends_at: number }[]>> = {};
   if (techs.length) {
     // True N+1 elimination: 4 queries total for all techs, not 4*N.
     const byTech = await getAvailableSlotsForDurationsForTechs(techs.map(t=> t.id), {}, allDurations as unknown as number[]);
     for (const t of techs) {
       slotsByTechByDuration[t.id] = (byTech[t.id] ?? {}) as Record<number, { starts_at: number; ends_at: number }[]>;
-      slotsByTech[t.id] = byTech[t.id]?.[durationMin] ?? [];
     }
   }
   return {
     // zod 4.5.2 vs sveltekit-superforms: _zod version mismatch, cast required
     form: await superValidate(zod4(bookJobSchema as any)),
-    techs: techs.map(t => ({ id: t.id, display_name: t.display_name })), slotsByTech, slotsByTechByDuration,
-    preselectTech, preselectDate: url.searchParams.get('date') || '',
-    preselectStart: url.searchParams.get('start') || '10:00', durationMin
+    techs: techs.map(t => ({ id: t.id, display_name: t.display_name })), slotsByTechByDuration,
+    preselectTech, durationMin
   };
 };
 

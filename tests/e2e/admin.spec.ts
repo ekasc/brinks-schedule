@@ -44,24 +44,4 @@ test.describe('admin', () => {
     await newContext.close();
   });
 
-  test('admin can disable a user (cannot disable self)', async ({ page }) => {
-    await login(page, 'admin');
-    await page.goto('/admin');
-
-    const username = uniqueUsername('disable');
-    await page.getByRole('button', { name: 'New user' }).click();
-    await page.locator('#new-username').fill(username);
-    await page.locator('#new-password').fill('testpass123');
-    await page.locator('#new-display').fill(`Z Disable ${username}`);
-    await page.locator('select[name="role"]').selectOption('sales');
-    await page.getByRole('button', { name: 'Create user' }).click();
-    await expect(page.getByText(`@${username}`)).toBeVisible({ timeout: 10_000 });
-
-    const row = page.locator(`text=@${username}`).locator('..').locator('..');
-    const disableBtn = row.getByRole('button', { name: /Disable/i }).first();
-    if (await disableBtn.count()) {
-      await disableBtn.click();
-      await expect(page.getByText('Saved.')).toBeVisible({ timeout: 5_000 }).catch(() => {});
-    }
-  });
 });

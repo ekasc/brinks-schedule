@@ -1,30 +1,20 @@
 import { fail, redirect } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
-import { listTemplatesForTechs, setPatternsForTech, listJobsForTechsSummary, listActiveUsers, findUserById } from '$lib/server/db';
+import { listTemplatesForTechs, setPatternsForTech, listActiveUsers, findUserById } from '$lib/server/db';
 
 export const load: PageServerLoad = async ({ locals }) => {
   if (!locals.user) throw redirect(302, '/login');
   const techs = (locals.user.role === 'tech') ? [locals.user] : await listActiveUsers('tech');
   const templatesByTech: Record<number, any[]> = {};
-  const jobsByTech: Record<number, any[]> = {};
-  const now = Math.floor(Date.now()/1000);
-  const horizon = now + 60*86400;
   if (techs.length) {
-    const techIds = techs.map(t=> t.id);
-    const [allTemplates, allJobs] = await Promise.all([
-      listTemplatesForTechs(techIds),
-      listJobsForTechsSummary(now, horizon, techIds)
-    ]);
+    const allTemplates = await listTemplatesForTechs(techs.map(t=> t.id));
     for (const t of techs) {
       templatesByTech[t.id] = allTemplates.filter((r:any)=> r.tech_id === t.id);
-      jobsByTech[t.id] = allJobs.filter((j:any)=> j.tech_id === t.id && j.status!=='cancelled' && j.status!=='declined').slice(0,20);
     }
   }
   return {
     techs: techs.map(t => ({ id: t.id, display_name: t.display_name })),
     templatesByTech,
-    unavailableByTech: {} as Record<number, any[]>,
-    jobsByTech,
     // Sales can view hours but not change them (savePatterns 403s them).
     canSave: locals.user.role !== 'sales'
   };

@@ -4,6 +4,27 @@
 **Status:** Active development, not yet deployed. Breaking DB changes allowed.
 **Stack:** SvelteKit + Svelte 5, Vite 6, Tailwind 3, bits-ui, @internationalized/date, better-sqlite3 (local) / D1 (Cloudflare), Leaflet, adapter-cloudflare.
 
+> **Update 2026-09-05:** §2 below (weekly pattern + `kind` + ad-hoc unavailable tables) is superseded. Availability is now **Hours-only**: 0 or 1 interval per weekday in `availability_templates` (`UNIQUE(tech_id, dow)`), no `kind` column, no `availability_blocks`/`availability_unavailable` tables. `savePatterns` 400s any `kind` payload. Removed dead `unavailableByTech` from availability `load`.
+>
+> **Update 2026-09-06 (gotcha sweep + tech delete):**
+> - `/book` tech select never stuck: a `$: techId = data.preselectTech` sync-back clobbered every local pick (dropdown showed Tech 2, hidden `tech_id`/slots stayed on Tech 1). Deleted the statement; `let techId = data.preselectTech` covers initial load. E2E: `book-tech-switch.spec.ts`.
+> - Day bucketing is now Vancouver-wall everywhere (`weekOffset`: `vancouverTodayParts`/`addWallDays`/`wallDayIso`/`vancouverDayRange` over `vancouverMidnightEpoch`): Today, Calendar (rolling 7-day + `iso`/`weekStartIso` now wall ISO, fixes "Today" highlight), Route (deduped `dayRange`). Old server-local-midnight code was correct only on a Vancouver-TZ host; Workers run UTC. Tests pass under `TZ=UTC` too.
+> - `/route` resyncs `selTech`/`selDate` when loaded data changes (browser Back no longer leaves a stale selection). E2E: `route-resync.spec.ts`.
+> - Removed dead `myTechId` (Today), `preselectDate`/`preselectStart` (`/book`), dead `export let form` (availability, killed its svelte-check warning). `/route` maps techs to `{id, display_name}`.
+> - Techs can now delete their own jobs (incl. signed; completed still needs reopen first, other party is notified). Server `delete` + edit-page danger zone + unit/e2e cover.
+>
+> **Update 2026-09-06 (audit round — all fixed, one finding rejected with evidence):**
+> - Calendar `todayIso` now comes from the server (Vancouver wall); day labels derive from the wall `iso`, not the `Date` instant — correct for any browser TZ. Today page `isToday` compares Vancouver wall days (`dashboardView.vancouverIsoDay`).
+> - Removed dead `jobsByTech` 60-day query from availability `load`; deleted orphaned `startOfDayLocal` (+ its tests); route `vancouverToday()` reuses `wallDayIso`.
+> - Danger zone hidden for completed installs (server 400s those deletes).
+> - Rejected: auditor's split-field route resync (preserve-local-edits) would reintroduce URL/UI divergence after Back; coupled converge-to-server-truth kept and proven by a rapid double-pick e2e. E2E `route-resync` now covers tech-Back, date-Back, double-pick.
+>
+> **Update 2026-09-06 (second audit round — dual auditors, all accepted items fixed):**
+> - Server: admin export window is Vancouver-wall + CSV reads `listJobsSummary` (decrypting only the 3 CSV text fields, no more `SELECT *`); `getVancouverParts` normalizes ICU hour-24→0; tech map-backfill scoped to own jobs; `listContracts` selects `SAFE_JOB_COLS` (no PII columns); Today/Route/Map use `listActiveUsers('tech')`; job loads 404 (not 403) for non-viewers to close the id-enumeration oracle (actions stay 403); admin self-demotion refused; edit-save does one fetch; dead UTC-strftime SQL builder deleted, live EXISTS fragment asserts safe-integer bounds; tech `username` dropped from job page data.
+> - Client: all time-of-day/day labels render in `America/Vancouver` (`dashboardView.fmtVancouverTime/Day`, incl. slot labels, route, calendar, income, job detail, Today); book Today/Tomorrow badges use Vancouver wall (`vancouverIsoTomorrow` added); availability save captures `savedTech` so a mid-flight tech switch can't wipe the new draft; job status/complete failures surface an error instead of looking dead; redundant `slotsByTech` payload removed (per-duration buckets are authoritative).
+> - Tests: `auditFixes.test.js` (midnight hour, export wall boundaries + no ciphertext, geocode scope, contracts column allow-list, inactive-tech roster); sales-availability e2e pins read-only UI + action 403; Monday restore moved to `afterEach`; vacuous admin-disable e2e removed (no such feature).
+> - Declined with reason: signed Cancel/Decline buttons (product call — delete covers removal); book remount guard (no reachable `?tech=` navigation); `?tech=` enumeration (sales see all routes by design); deleting dead-but-test-used db helpers; deprecated income/stats servers (hooks-unreachable).
+
 ## What this is
 Schedule / dispatch for techs + sales + admin. Core flows: weekly availability → slot generation → job booking → calendar/route/map → job detail status/completion. Roles: `tech` (own data only), `sales` (book/search), `admin` (Clients + Admin only).
 

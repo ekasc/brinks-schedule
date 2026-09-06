@@ -1,10 +1,11 @@
 <script lang="ts">
   import type { PageData } from './$types';
+  import { fmtVancouverDay, fmtVancouverTime } from '$lib/dashboardView';
   export let data: PageData;
 
   const fmtCents = (c: number) => `$${(c / 100).toFixed(2)}`;
-  const fmtDay = (ts: number) => new Date(ts * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-  const fmtTime = (ts: number) => new Date(ts * 1000).toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const fmtDay = (ts: number) => fmtVancouverDay(ts);
+  const fmtTime = (ts: number) => fmtVancouverTime(ts);
   const periodLabel = data.period === 'w' ? 'this week' : data.period === 'm' ? 'this month' : 'all time';
 </script>
 
