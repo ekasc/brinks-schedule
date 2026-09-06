@@ -1,23 +1,32 @@
 <script lang="ts">
   import type { PageData } from './$types';
-  import { localIsoDay } from '$lib/dashboardView';
+  import { fmtVancouverTime } from '$lib/dashboardView';
   export let data: PageData;
 
-  $: todayIso = localIsoDay();
-  $: weekEnd = data.days.at(-1)?.date;
+  // Server Vancouver-wall "today" — browser-local dates disagree for
+  // travellers and on UTC hosts, so never compare against those here.
+  $: todayIso = data.todayIso;
+  $: weekEndIso = data.days.at(-1)?.iso;
   $: totalJobs = data.days.reduce(
     (total, day) => total + day.techs.reduce((dayTotal, tech) => dayTotal + tech.jobs.length, 0),
     0
   );
 
   function fmtTime(ts: number) {
-    return new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    return fmtVancouverTime(ts);
   }
-  function fmtDayLong(date: Date) {
-    return date.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+  // Wall-date labels derive from the YYYY-MM-DD iso (parsed as browser-local
+  // midnight), never from the Date instant — the instant renders a day off
+  // for browsers behind Vancouver.
+  function dayDate(iso: string) {
+    return new Date(iso + 'T00:00:00');
   }
-  function weekLabel(startIso: string, end: Date | undefined) {
+  function fmtDayLong(iso: string) {
+    return dayDate(iso).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' });
+  }
+  function weekLabel(startIso: string, endIso: string | undefined) {
     const start = new Date(startIso.slice(0, 10) + 'T00:00:00');
+    const end = endIso ? new Date(endIso.slice(0, 10) + 'T00:00:00') : undefined;
     if (!end) return start.toLocaleDateString(undefined, { month: 'long', day: 'numeric' });
     const startText = start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
     const endText = end.toLocaleDateString(undefined, {
@@ -29,7 +38,7 @@
   }
 </script>
 
-<svelte:head><title>Week · {weekLabel(data.weekStartIso, weekEnd)}</title></svelte:head>
+<svelte:head><title>Week · {weekLabel(data.weekStartIso, weekEndIso)}</title></svelte:head>
 
 <div class="relative left-1/2 w-[calc(100vw-48px)] max-w-[1100px] -translate-x-1/2">
 <header class="mb-4 pt-2 sm:mb-5">
@@ -39,7 +48,7 @@
         {data.offsetWeeks === 0 ? 'Next 7 days' : data.offsetWeeks > 0 ? `${data.offsetWeeks} week${data.offsetWeeks === 1 ? '' : 's'} ahead` : `${Math.abs(data.offsetWeeks)} week${data.offsetWeeks === -1 ? '' : 's'} ago`}
       </p>
       <h1 class="text-[28px] font-bold leading-none tracking-[-0.02em] text-[var(--ink)]">
-        {weekLabel(data.weekStartIso, weekEnd)}
+        {weekLabel(data.weekStartIso, weekEndIso)}
       </h1>
     </div>
     <span class="rounded-full bg-[var(--row)] px-2.5 py-1 text-[13px] font-medium text-[var(--dim)] border border-[var(--line-thin)]">
@@ -63,8 +72,8 @@
           {#each data.days as day}
             <th class="px-1.5 py-2 text-center">
               <span class={day.iso === todayIso ? 'inline-flex min-w-14 flex-col rounded-[10px] bg-[var(--blue)] px-2 py-1 text-white' : 'inline-flex min-w-14 flex-col rounded-[10px] px-2 py-1 text-[var(--dim)] bg-[var(--row2)] border border-[var(--line-thin)]'}>
-                <span class="text-[11px] font-semibold uppercase tracking-wide">{day.date.toLocaleDateString(undefined, { weekday: 'short' })}</span>
-                <span class="text-[17px] font-bold leading-tight">{day.date.getDate()}</span>
+                <span class="text-[11px] font-semibold uppercase tracking-wide">{dayDate(day.iso).toLocaleDateString(undefined, { weekday: 'short' })}</span>
+                <span class="text-[17px] font-bold leading-tight">{dayDate(day.iso).getDate()}</span>
               </span>
             </th>
           {/each}
@@ -106,7 +115,7 @@
     <section aria-labelledby={`day-${day.iso}`}>
       <div class="mb-2 flex items-center justify-between px-1">
         <h2 id={`day-${day.iso}`} class={day.iso === todayIso ? 'text-[15px] font-semibold text-[var(--blue)]' : 'text-[15px] font-semibold text-[var(--ink)]'}>
-          {fmtDayLong(day.date)}{day.iso === todayIso ? ' · Today' : ''}
+          {fmtDayLong(day.iso)}{day.iso === todayIso ? ' · Today' : ''}
         </h2>
         <span class="text-[13px] text-[var(--dim)]">{dayJobs.length || 'No'} {dayJobs.length === 1 ? 'job' : 'jobs'}</span>
       </div>

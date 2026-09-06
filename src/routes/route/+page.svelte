@@ -10,6 +10,7 @@
   import { Select, Calendar, Popover, Button, Dialog } from 'bits-ui';
   import { CalendarDate, parseDate, today, getLocalTimeZone } from '@internationalized/date';
   import { swipeSheet } from '$lib/actions/swipeSheet';
+  import { fmtVancouverTime } from '$lib/dashboardView';
   export let data: PageData;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -24,6 +25,18 @@
 
   let selTech = data.techId;
   let selDate = data.date;
+  // Resync only when the loaded data itself changes (browser Back/forward to a
+  // different ?tech=/?date= reuses this component without remounting). Local
+  // picks set selTech/selDate before goto() fires with the same values, so
+  // this never clobbers an in-flight selection — it converges to server truth.
+  let lastTech = data.techId;
+  let lastDate = data.date;
+  $: if (data.techId !== lastTech || data.date !== lastDate) {
+    lastTech = data.techId;
+    lastDate = data.date;
+    selTech = data.techId;
+    selDate = data.date;
+  }
 
   $: routeTechItems = data.techs.map((t) => ({ value: String(t.id), label: t.display_name }));
 
@@ -116,7 +129,7 @@
   $: conflicts = legs.filter((l) => l.leg && !(l.leg as any).ok).length;
 
   function fmtTime(ts: number) {
-    return new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    return fmtVancouverTime(ts);
   }
   function escapeHtml(s: string): string {
     return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);

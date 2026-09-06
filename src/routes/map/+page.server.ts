@@ -4,7 +4,7 @@ import { env } from '$env/dynamic/private';
 import {
   listAllJobsForMap,
   listJobsForMapForTech,
-  listUsers,
+  listActiveUsers,
   countUnmapped,
   countUnmappedForTech,
   geocodeMissingCoords
@@ -28,8 +28,8 @@ export const load: PageServerLoad = async ({ locals }) => {
     };
   }
   // Independent queries — one round trip instead of three.
-  const [jobs, users, unmapped] = await Promise.all([listAllJobsForMap(), listUsers(), countUnmapped()]);
-  const techs = users.filter((u) => u.role === 'tech');
+  // Active techs only, matching calendar/book/route.
+  const [jobs, techs, unmapped] = await Promise.all([listAllJobsForMap(), listActiveUsers('tech'), countUnmapped()]);
   return {
     jobs,
     techs,
@@ -42,9 +42,10 @@ export const actions: Actions = {
   geocodeAll: async ({ locals }) => {
     // Any signed-in role may backfill pins (idempotent). The old admin-only
     // guard made the button fail for every viewer, since admins never load this page.
+    // Techs are scoped to their own jobs so one tap can't burn quota globally.
     if (!locals.user) throw redirect(302, '/login');
     try {
-      const res = await geocodeMissingCoords(100);
+      const res = await geocodeMissingCoords(100, locals.user.role === 'tech' ? locals.user.id : undefined);
       return { ...res, ok: true };
     } catch {
       return fail(500, { ok: false, error: 'Geocoding failed.' });

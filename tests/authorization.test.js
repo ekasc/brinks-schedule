@@ -106,7 +106,7 @@ describe('admin route policy', () => {
 });
 
 describe('job route authorization - cross-tech forbidden (real helper)', () => {
-  test('tech cannot load or act on another tech job - real helper throws 403', async () => {
+  test("tech cannot load another tech job - helper throws 404 (no existence oracle)", async () => {
     const { isTechForbidden, assertJobLoadAccess } = await import('../src/lib/server/jobAccess');
     const techA = { id: 101, role: 'tech' };
     const techBJob = { tech_id: 202 };
@@ -115,7 +115,7 @@ describe('job route authorization - cross-tech forbidden (real helper)', () => {
     assert.equal(isTechForbidden(techA, ownJob), false);
     assert.equal(isTechForbidden({ id: 55, role: 'sales' }, techBJob), false);
     let threw = false;
-    try { assertJobLoadAccess(techA, techBJob); } catch (e) { threw = true; assert.equal(e.status, 403); }
+    try { assertJobLoadAccess(techA, techBJob); } catch (e) { threw = true; assert.equal(e.status, 404); }
     assert.equal(threw, true);
     // own job should not throw
     assert.doesNotThrow(() => assertJobLoadAccess(techA, ownJob));

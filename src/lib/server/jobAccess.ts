@@ -13,8 +13,10 @@ export function isTechForbidden(user: UserTarget, job: { tech_id: number } | nul
 }
 
 export function assertJobLoadAccess(user: UserTarget, job: JobArg): asserts job is JobTarget {
+  // 404 in both cases: a 403 would let a tech distinguish "no such job"
+  // from "someone else's job" (job ids are sequential).
   if (!job) throw error(404, 'Job not found');
-  if (isTechForbidden(user, job)) throw error(403, 'Forbidden');
+  if (isTechForbidden(user, job)) throw error(404, 'Job not found');
 }
 
 // Centralized job policies — preserve current effective behavior, do not infer

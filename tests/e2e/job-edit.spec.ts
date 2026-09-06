@@ -52,9 +52,9 @@ test.describe('job edit / decline / delete', () => {
     await expect(page.getByText('Not found')).toBeVisible({ timeout: 10_000 });
   });
 
-  test('tech cannot delete (no danger zone)', async ({ page, context }) => {
+  test('assigned tech can delete own job (danger zone)', async ({ page, context }) => {
     await login(page, 'ekas');
-    const clientName = `E2E Nodelete ${Date.now().toString().slice(-6)}`;
+    const clientName = `E2E Techdelete ${Date.now().toString().slice(-6)}`;
     await bookJob(page, clientName);
     const jobUrl = page.url();
     await clearAuth(page, context);
@@ -64,6 +64,11 @@ test.describe('job edit / decline / delete', () => {
     await expect(page.getByText(clientName).first()).toBeVisible();
     await page.getByRole('link', { name: 'Edit' }).click();
     await expect(page.getByRole('heading', { name: /Edit job/i })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Delete job/ })).toHaveCount(0);
+    // Delete with two-tap confirm lands home; the old URL is a branded 404.
+    await page.getByRole('button', { name: 'Delete job…' }).click();
+    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    await page.waitForURL('/', { timeout: 15_000 });
+    await page.goto(jobUrl);
+    await expect(page.getByText('Not found')).toBeVisible({ timeout: 10_000 });
   });
 });

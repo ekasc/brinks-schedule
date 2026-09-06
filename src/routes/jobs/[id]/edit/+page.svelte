@@ -12,7 +12,12 @@
   let city: string = data.job.city ?? '';
   let province: string = data.job.province ?? '';
 
-  $: canDelete = data.user?.role === 'sales' && data.job.booked_by === data.user?.id;
+  // Completed installs must be reopened first (the server 400s otherwise),
+  // so don't offer delete for them.
+  $: canDelete =
+    ((data.user?.role === 'sales' && data.job.booked_by === data.user?.id) ||
+      (data.user?.role === 'tech' && data.job.tech_id === data.user?.id)) &&
+    data.job.completed_at == null;
   let confirmDelete = false;
   let saving = false;
   let deleting = false;

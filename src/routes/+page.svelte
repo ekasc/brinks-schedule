@@ -2,10 +2,11 @@
   import type { PageData } from './$types';
   export let data: PageData;
   let query = '';
-  function fmtTime(ts: number) { return new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }); }
-  function fmtDay(ts: number) { return new Date(ts * 1000).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }); }
-  function isToday(ts: number) { const d = new Date(ts * 1000), n = new Date(); return d.toDateString() === n.toDateString(); }
-  import { getTodayHeading } from '$lib/dashboardView';
+  function fmtTime(ts: number) { return fmtVancouverTime(ts); }
+  function fmtDay(ts: number) { return fmtVancouverDay(ts); }
+  import { getTodayHeading, vancouverIsoDay, fmtVancouverDay, fmtVancouverTime } from '$lib/dashboardView';
+  // Same clock as the server buckets: Vancouver wall day, not browser-local.
+  function isToday(ts: number) { return vancouverIsoDay(new Date(ts * 1000)) === vancouverIsoDay(); }
   $: visible = data.upcoming.filter(j => !query || `${j.client_name} ${j.address ?? ''} ${j.tech_name}`.toLowerCase().includes(query.toLowerCase()));
   $: grouped = data.techs.map(t => ({ tech: t, jobs: visible.filter(j => j.tech_id === t.id) })).filter(g => g.jobs.length);
 </script>

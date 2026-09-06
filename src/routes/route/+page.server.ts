@@ -1,14 +1,11 @@
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { listJobsSummary, listUsers, getVancouverParts } from '$lib/server/db';
+import { listJobsSummary, listActiveUsers } from '$lib/server/db';
+import { vancouverDayRange, vancouverTodayParts, wallDayIso } from '$lib/server/weekOffset';
 
-function pad(n: number): string {
-  return String(n).padStart(2, '0');
-}
 /** Vancouver wall date — the server runs on UTC, and toISOString shifts evenings. */
 function vancouverToday(): string {
-  const p = getVancouverParts(Math.floor(Date.now() / 1000));
-  return `${p.year}-${pad(p.month)}-${pad(p.day)}`;
+  return wallDayIso(vancouverTodayParts());
 }
 /** Garbage ?date= falls back to today instead of querying NaN ranges. */
 function parseDateParam(raw: string | null, fallback: string): string {
@@ -17,6 +14,11 @@ function parseDateParam(raw: string | null, fallback: string): string {
   const dt = new Date(y, m - 1, d);
   if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) return fallback;
   return raw;
+}
+/** Epoch [start, end) for a Vancouver wall day — server-local midnight is off by 7-8h on UTC hosts. */
+function dayRange(dateStr: string): { start: number; end: number } {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return vancouverDayRange({ year: y, month: m, day: d });
 }
 
 export const load: PageServerLoad = async ({ locals, url }) => {
@@ -28,10 +30,7 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     const techId = locals.user.id;
     const techs = [{ id: locals.user.id, display_name: locals.user.display_name }];
     const dateStr = parseDateParam(url.searchParams.get('date'), vancouverToday());
-    const [y, m, d] = dateStr.split('-').map(Number);
-    const dayStart = Math.floor(new Date(y, m - 1, d, 0, 0, 0, 0).getTime() / 1000);
-    const nextDay = new Date(y, m - 1, d, 0, 0, 0, 0); nextDay.setDate(nextDay.getDate() + 1);
-    const dayEnd = Math.floor(nextDay.getTime() / 1000);
+    const { start: dayStart, end: dayEnd } = dayRange(dateStr);
     const jobs = techId ? await listJobsSummary(dayStart, dayEnd, techId) : [];
     return { techs, techId, date: dateStr, jobs };
   }
@@ -39,16 +38,16 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   // When a tech is picked via ?tech=, both queries are independent — fire together.
   // Otherwise the tech list decides the default tech, so it stays sequential.
   const paramTech = Number(url.searchParams.get('tech')) || 0;
-  const techsPromise = listUsers();
+  // Active techs only — matches calendar/book scoping.
+  const techsPromise = listActiveUsers('tech');
   const dateStr = parseDateParam(url.searchParams.get('date'), vancouverToday());
 
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const dayStart = Math.floor(new Date(y, m - 1, d, 0, 0, 0, 0).getTime() / 1000);
-  const nextDay = new Date(y, m - 1, d, 0, 0, 0, 0); nextDay.setDate(nextDay.getDate() + 1);
-  const dayEnd = Math.floor(nextDay.getTime() / 1000);
+  const { start: dayStart, end: dayEnd } = dayRange(dateStr);
   const jobsPromise = paramTech ? listJobsSummary(dayStart, dayEnd, paramTech) : null;
 
-  const techs = (await techsPromise).filter((u) => u.role === 'tech');
+  const techs = (await techsPromise)
+    .filter((u) => u.role === 'tech')
+    .map((t) => ({ id: t.id, display_name: t.display_name }));
   const techId = paramTech || (techs[0]?.id ?? 0);
 
   const jobs = jobsPromise ? await jobsPromise : techId ? await listJobsSummary(dayStart, dayEnd, techId) : [];
