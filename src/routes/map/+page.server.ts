@@ -4,7 +4,7 @@ import { env } from '$env/dynamic/private';
 import {
   listAllJobsForMap,
   listJobsForMapForTech,
-  listActiveUsers,
+  listUsers,
   countUnmapped,
   countUnmappedForTech,
   geocodeMissingCoords
@@ -28,8 +28,10 @@ export const load: PageServerLoad = async ({ locals }) => {
     };
   }
   // Independent queries — one round trip instead of three.
-  // Active techs only, matching calendar/book/route.
-  const [jobs, techs, unmapped] = await Promise.all([listAllJobsForMap(), listActiveUsers('tech'), countUnmapped()]);
+  // All techs, including inactive: is_active gates login, never the
+  // visibility of existing assignments.
+  const [jobs, users, unmapped] = await Promise.all([listAllJobsForMap(), listUsers(), countUnmapped()]);
+  const techs = users.filter((u) => u.role === 'tech');
   return {
     jobs,
     techs,

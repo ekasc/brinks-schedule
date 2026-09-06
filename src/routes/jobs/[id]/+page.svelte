@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { PageData } from './$types';
   import { fmtVancouverDay, fmtVancouverTime } from '$lib/dashboardView';
+  import { deserialize } from '$app/forms';
   import { invalidateAll } from '$app/navigation';
   import { Button } from 'bits-ui';
   import { fly, scale } from 'svelte/transition';
@@ -28,6 +29,16 @@
     return years;
   }
 
+  async function actionError(res: Response, fallback: string): Promise<string> {
+    try {
+      const payload = deserialize(await res.text()) as any;
+      const err = payload?.data?.error;
+      return typeof err === 'string' && err ? err : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
   async function setStatus(s: string) {
     busy = true;
     confirmStatus = null;
@@ -36,7 +47,7 @@
       const fd = new FormData();
       fd.set('status', s);
       const res = await fetch('?/status', { method: 'POST', body: fd });
-      if (!res.ok) actionErr = res.status === 409 ? 'That change conflicts with another booking.' : 'Could not update status. Try again.';
+      if (!res.ok) actionErr = await actionError(res, 'Could not update status. Try again.');
       await invalidateAll();
     } finally {
       busy = false;
@@ -78,7 +89,7 @@
       const fd = new FormData();
       fd.set('completed', done ? '1' : '0');
       const res = await fetch('?/complete', { method: 'POST', body: fd });
-      if (!res.ok) actionErr = res.status === 409 ? 'That change conflicts with another booking.' : 'Could not update. Try again.';
+      if (!res.ok) actionErr = await actionError(res, 'Could not update. Try again.');
       await invalidateAll();
     } finally {
       busy = false;

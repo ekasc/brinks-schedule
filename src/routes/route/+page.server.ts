@@ -1,6 +1,6 @@
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { listJobsSummary, listActiveUsers } from '$lib/server/db';
+import { listJobsSummary, listUsers } from '$lib/server/db';
 import { vancouverDayRange, vancouverTodayParts, wallDayIso } from '$lib/server/weekOffset';
 
 /** Vancouver wall date — the server runs on UTC, and toISOString shifts evenings. */
@@ -38,8 +38,9 @@ export const load: PageServerLoad = async ({ locals, url }) => {
   // When a tech is picked via ?tech=, both queries are independent — fire together.
   // Otherwise the tech list decides the default tech, so it stays sequential.
   const paramTech = Number(url.searchParams.get('tech')) || 0;
-  // Active techs only — matches calendar/book scoping.
-  const techsPromise = listActiveUsers('tech');
+  // All techs, including inactive: is_active gates login, never the
+  // visibility of existing assignments.
+  const techsPromise = listUsers();
   const dateStr = parseDateParam(url.searchParams.get('date'), vancouverToday());
 
   const { start: dayStart, end: dayEnd } = dayRange(dateStr);
