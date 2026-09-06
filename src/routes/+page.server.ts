@@ -1,6 +1,6 @@
 import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { listJobsSummary, listActiveUsers } from '$lib/server/db';
+import { listJobsSummary, listUsers } from '$lib/server/db';
 import { addWallDays, vancouverDayRange, vancouverTodayParts } from '$lib/server/weekOffset';
 
 export const load: PageServerLoad = async ({ locals, url }) => {
@@ -25,9 +25,10 @@ export const load: PageServerLoad = async ({ locals, url }) => {
     allJobs = await listJobsSummary(todayStart, tomorrowEnd, locals.user.id);
   } else {
     // Independent queries — one round trip instead of two.
-    // Active techs only: departed techs get no dashboard cards.
+    // All techs, including inactive: is_active gates login, never the
+    // visibility of existing assignments.
     [techs, allJobs] = await Promise.all([
-      listActiveUsers('tech'),
+      listUsers('tech'),
       listJobsSummary(todayStart, tomorrowEnd)
     ]);
   }

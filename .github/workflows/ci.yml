@@ -40,8 +40,15 @@ jobs:
       - name: Type check
         run: pnpm check
 
-      - name: Unit tests
+      - name: Unit tests (UTC — production timezone)
         run: pnpm test
+        env:
+          TZ: UTC
+
+      - name: Unit tests (America/Vancouver — business timezone)
+        run: pnpm test
+        env:
+          TZ: America/Vancouver
 
       - name: Build
         run: pnpm build

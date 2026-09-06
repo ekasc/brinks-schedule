@@ -132,17 +132,29 @@ describe('contracts roster columns', () => {
   });
 });
 
-describe('today roster skips inactive techs', () => {
-  test('departed techs get no dashboard cards', async () => {
+describe('today roster keeps inactive techs', () => {
+  test("disabling an account hides nothing: tech card and signed job stay visible", async () => {
     const active = await mkUser('tech', 'Today Active');
     const gone = await mkUser('tech', 'Today Gone');
     const sales = await mkUser('sales', 'Today Sales');
+    const p = db.getVancouverParts(Math.floor(Date.now() / 1000));
+    await db.setPatternsForTech(gone, [{ dow: p.dow, start_min: 0, end_min: 1440 }]);
+    const r = await db.createJob({
+      tech_id: gone, booked_by: sales, client_name: `Gone Job ${Date.now()}`,
+      address: '1 Main St, Vancouver, BC V6A 1A1',
+      street: '1 Main St', city: 'Vancouver', province: 'BC', postal_code: 'V6A 1A1',
+      starts_at: db.vancouverWallToEpoch(p.year, p.month, p.day, p.hour, p.minute),
+      ends_at: db.vancouverWallToEpoch(p.year, p.month, p.day, p.hour, p.minute) + 3600
+    });
+    assert.ok(!('conflict' in r));
+    await db.setJobStatus(r.id, 'signed', sales);
     await db.setUserActive(gone, false);
     const data = await todayLoad({
       locals: { user: { id: sales, role: 'sales', username: 's', display_name: 'S' } },
       url: new URL('http://test/')
     });
-    assert.ok(!data.techs.some((t) => t.id === gone), 'inactive tech excluded');
+    assert.ok(data.techs.some((t) => t.id === gone), 'inactive tech still listed');
     assert.ok(data.techs.some((t) => t.id === active), 'active tech kept');
+    assert.ok(data.upcoming.some((j) => j.tech_id === gone), 'inactive tech job still visible');
   });
 });
